@@ -220,7 +220,20 @@ def run_ingestion(run_config: IngestionRunConfig) -> dict[str, str | None]:
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _normalize_argv() -> None:
+    """
+    Databricks Serverless passes job parameters as a single string element
+    in sys.argv, e.g. ["main.py", "--sources all --years 2023,2024"].
+    Split it into proper tokens so argparse can handle them.
+    """
+    if len(sys.argv) == 2 and sys.argv[1].startswith("--"):
+        import shlex
+        extra = shlex.split(sys.argv[1])
+        sys.argv = [sys.argv[0]] + extra
+
+
 def main() -> int:
+    _normalize_argv()
     parser = _build_arg_parser()
     args = parser.parse_args()
 
