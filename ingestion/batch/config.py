@@ -75,7 +75,7 @@ SOURCE_CONFIGS: dict[str, SourceConfig] = {
         bronze_path=bronze_s3_path("uf"),
         partition_by=None,
         filter_by_year=False,
-        required_columns=("sigla_uf", "nome"),
+        required_columns=("sigla", "nome"),
         description="State (UF) reference directory.",
     ),
     "municipio": SourceConfig(

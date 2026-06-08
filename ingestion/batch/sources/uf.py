@@ -9,12 +9,4 @@ class UfSource(BaseSource):
     """Extract state reference data from the Base dos Dados directory."""
 
     def build_query(self) -> str:
-        return self._compose_query(
-            select_clause=(
-                "sigla_uf,\n"
-                "    nome,\n"
-                "    id_uf,\n"
-                "    nome_regiao,\n"
-                "    id_regiao"
-            )
-        )
+        return self._compose_query(select_clause="*")
