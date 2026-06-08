@@ -65,7 +65,7 @@ class SourceConfig:
 
 def bronze_s3_path(source_name: str) -> str:
     """Return the full S3 path for a Bronze source."""
-    return f"s3a://{S3_BUCKET}/{BRONZE_PREFIX}/{source_name}"
+    return f"s3://{S3_BUCKET}/{BRONZE_PREFIX}/{source_name}"
 
 
 SOURCE_CONFIGS: dict[str, SourceConfig] = {

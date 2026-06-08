@@ -26,8 +26,8 @@ from ingestion.batch.config import (
     SOURCE_CONFIGS,
     IngestionRunConfig,
 )
+from ingestion.batch.connections.aws_credentials import resolve_aws_storage_options
 from ingestion.batch.connections.bigquery_client import create_bigquery_client
-from ingestion.batch.connections.spark_s3 import get_or_create_spark_session
 from ingestion.batch.sources import SOURCE_REGISTRY
 
 logging.basicConfig(
@@ -183,8 +183,8 @@ def run_ingestion(run_config: IngestionRunConfig) -> dict[str, str | None]:
     logger.info("Row limit: %s", run_config.row_limit or "none")
 
     bq_client = create_bigquery_client()
-    spark = get_or_create_spark_session()
-    writer = BronzeWriter(spark)
+    storage_options = resolve_aws_storage_options()
+    writer = BronzeWriter(storage_options)
 
     results: dict[str, str | None] = {}
 
