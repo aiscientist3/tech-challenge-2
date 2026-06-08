@@ -110,7 +110,7 @@ def build_source_configs(
         ),
         "meta_brasil": SourceConfig(
             name="meta_brasil",
-            bq_table=f"{BIGQUERY_PUBLIC_DATASET}.br_inep_avaliacao_alfabetizacao.brasil",
+            bq_table=f"{BIGQUERY_PUBLIC_DATASET}.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_brasil",
             bronze_path=path("meta_brasil"),
             partition_by="ano",
             filter_by_year=True,
@@ -119,7 +119,7 @@ def build_source_configs(
         ),
         "meta_uf": SourceConfig(
             name="meta_uf",
-            bq_table=f"{BIGQUERY_PUBLIC_DATASET}.br_inep_avaliacao_alfabetizacao.uf",
+            bq_table=f"{BIGQUERY_PUBLIC_DATASET}.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_uf",
             bronze_path=path("meta_uf"),
             partition_by="ano",
             filter_by_year=True,
@@ -128,7 +128,7 @@ def build_source_configs(
         ),
         "meta_municipio": SourceConfig(
             name="meta_municipio",
-            bq_table=f"{BIGQUERY_PUBLIC_DATASET}.br_inep_avaliacao_alfabetizacao.municipio",
+            bq_table=f"{BIGQUERY_PUBLIC_DATASET}.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_municipio",
             bronze_path=path("meta_municipio"),
             partition_by="ano",
             filter_by_year=True,
@@ -137,7 +137,7 @@ def build_source_configs(
         ),
         "alunos": SourceConfig(
             name="alunos",
-            bq_table=f"{BIGQUERY_PUBLIC_DATASET}.br_inep_avaliacao_alfabetizacao.microdados",
+            bq_table=f"{BIGQUERY_PUBLIC_DATASET}.br_inep_avaliacao_alfabetizacao.alunos",
             bronze_path=path("alunos"),
             partition_by="ano",
             filter_by_year=True,

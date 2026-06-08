@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 import pandas as pd
+from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
 
 from ingestion.batch.config import (
@@ -72,6 +73,14 @@ class BaseSource(ABC):
                     len(df),
                 )
                 return df
+            except NotFound as exc:
+                # Table does not exist — skip gracefully without retrying.
+                self.logger.warning(
+                    "Table not found for source '%s', skipping: %s",
+                    self.source_name,
+                    exc,
+                )
+                return pd.DataFrame()
             except Exception as exc:
                 last_error = exc
                 self.logger.warning(
