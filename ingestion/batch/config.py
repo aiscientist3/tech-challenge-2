@@ -21,7 +21,7 @@ BIGQUERY_PUBLIC_DATASET: str = "basedosdados"
 # ---------------------------------------------------------------------------
 # AWS / S3
 # ---------------------------------------------------------------------------
-S3_BUCKET: str = os.getenv("S3_BUCKET", "tech-challenge-2-datalake")
+S3_BUCKET: str = os.getenv("S3_BUCKET", "tech-challenge-2-datalake-781863100038-us-east-1-an")
 BRONZE_PREFIX: str = os.getenv("BRONZE_PREFIX", "bronze/br_inep_alfabetizacao")
 
 # ---------------------------------------------------------------------------
