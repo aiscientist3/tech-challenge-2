@@ -92,17 +92,25 @@ def _configure_s3_credentials(
     spark: SparkSession,
     credentials: tuple[str, str] | None,
 ) -> None:
-    """Inject AWS credentials into an existing SparkSession's hadoop config."""
+    """
+    Inject AWS credentials into an existing SparkSession via spark.conf.set().
+
+    Uses the Spark Connect-compatible API (no sparkContext/_jsc access),
+    which is required for Databricks Serverless.
+    """
     if credentials is None:
         return
 
     access_key, secret_key = credentials
-    hadoop_conf = spark.sparkContext._jsc.hadoopConfiguration()
-    hadoop_conf.set("fs.s3a.access.key", access_key)
-    hadoop_conf.set("fs.s3a.secret.key", secret_key)
-    hadoop_conf.set(
-        "fs.s3a.aws.credentials.provider",
+    spark.conf.set("spark.hadoop.fs.s3a.access.key", access_key)
+    spark.conf.set("spark.hadoop.fs.s3a.secret.key", secret_key)
+    spark.conf.set(
+        "spark.hadoop.fs.s3a.aws.credentials.provider",
         "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
+    )
+    spark.conf.set(
+        "spark.hadoop.fs.s3a.impl",
+        "org.apache.hadoop.fs.s3a.S3AFileSystem",
     )
 
 
