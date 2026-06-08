@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environment
+.env
+.venv/
+venv/
+
+# Credentials — never commit
+*.json
+!databricks/job_config.example.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Spark / Delta
+spark-warehouse/
+metastore_db/
+_delta_log/
+
+# OS
+.DS_Store
