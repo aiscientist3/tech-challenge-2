@@ -25,10 +25,17 @@ S3_BUCKET: str = os.getenv("S3_BUCKET", "tech-challenge-2-datalake")
 BRONZE_PREFIX: str = os.getenv("BRONZE_PREFIX", "bronze/br_inep_alfabetizacao")
 
 # ---------------------------------------------------------------------------
-# Databricks Secret Scope
+# Databricks Secret Scope — GCP
 # ---------------------------------------------------------------------------
 DATABRICKS_SECRET_SCOPE: str = os.getenv("DATABRICKS_SECRET_SCOPE", "gcp")
 DATABRICKS_SECRET_KEY: str = os.getenv("DATABRICKS_SECRET_KEY", "service-account-json")
+
+# ---------------------------------------------------------------------------
+# Databricks Secret Scope — AWS
+# ---------------------------------------------------------------------------
+AWS_SECRET_SCOPE: str = os.getenv("AWS_SECRET_SCOPE", "aws")
+AWS_ACCESS_KEY_ID_SECRET: str = os.getenv("AWS_ACCESS_KEY_ID_SECRET", "access-key-id")
+AWS_SECRET_ACCESS_KEY_SECRET: str = os.getenv("AWS_SECRET_ACCESS_KEY_SECRET", "secret-access-key")
 
 # ---------------------------------------------------------------------------
 # Runtime defaults
