@@ -62,7 +62,10 @@ class BaseSource(ABC):
         for attempt in range(1, DEFAULT_RETRY_ATTEMPTS + 1):
             try:
                 query_job = self.client.query(query)
-                df = query_job.to_dataframe()
+                # create_bqstorage_client=False disables the BigQuery Storage
+                # Read API, avoiding the need for bigquery.readsessions.create
+                # permission. Sufficient for row-limited development queries.
+                df = query_job.to_dataframe(create_bqstorage_client=False)
                 self.logger.info(
                     "Extraction complete: '%s' — %d records.",
                     self.source_name,
