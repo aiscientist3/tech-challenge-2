@@ -23,10 +23,13 @@ from ingestion.batch.bronze_writer import BronzeWriter
 from ingestion.batch.config import (
     ALL_SOURCE_NAMES,
     DEFAULT_YEARS,
-    SOURCE_CONFIGS,
     IngestionRunConfig,
+    build_source_configs,
 )
-from ingestion.batch.connections.aws_credentials import resolve_aws_storage_options
+from ingestion.batch.connections.aws_credentials import (
+    resolve_aws_storage_options,
+    resolve_s3_bucket,
+)
 from ingestion.batch.connections.bigquery_client import create_bigquery_client
 from ingestion.batch.sources import SOURCE_REGISTRY
 
@@ -95,7 +98,7 @@ def _parse_sources(raw: str) -> list[str]:
         return list(ALL_SOURCE_NAMES)
 
     sources = [s.strip() for s in raw.split(",") if s.strip()]
-    invalid = [s for s in sources if s not in SOURCE_CONFIGS]
+    invalid = [s for s in sources if s not in ALL_SOURCE_NAMES]
     if invalid:
         raise ValueError(
             f"Unknown source(s): {invalid}. Valid options: {list(ALL_SOURCE_NAMES)}"
@@ -184,16 +187,20 @@ def run_ingestion(run_config: IngestionRunConfig) -> dict[str, str | None]:
 
     bq_client = create_bigquery_client()
     storage_options = resolve_aws_storage_options()
+    bucket = resolve_s3_bucket()
+    source_configs = build_source_configs(bucket)
     writer = BronzeWriter(storage_options)
+
+    logger.info("S3 bucket  : %s", bucket)
 
     results: dict[str, str | None] = {}
 
     for source_name in run_config.sources:
-        source_config = SOURCE_CONFIGS[source_name]
+        source_config = source_configs[source_name]
         source = SOURCE_REGISTRY[source_name](
             client=bq_client,
             run_config=run_config,
-            source_config=source_config,
+            source_config=source_configs[source_name],
         )
 
         logger.info("--- Processing source: %s ---", source_name)

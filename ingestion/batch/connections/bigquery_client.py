@@ -18,9 +18,9 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 
 from ingestion.batch.config import (
-    BIGQUERY_BILLING_PROJECT,
     DATABRICKS_SECRET_KEY,
     DATABRICKS_SECRET_SCOPE,
+    GCP_PROJECT_ID_SECRET_KEY,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,17 +86,44 @@ def _credentials_from_env() -> service_account.Credentials | None:
     return None
 
 
+def _resolve_gcp_project_id() -> str | None:
+    """Resolve GCP project ID from Databricks Secrets or environment variable."""
+    dbutils = _get_dbutils()
+    if dbutils is not None:
+        try:
+            project_id = dbutils.secrets.get(
+                scope=DATABRICKS_SECRET_SCOPE, key=GCP_PROJECT_ID_SECRET_KEY
+            )
+            logger.info(
+                "GCP project ID loaded from Databricks Secret Scope '%s'.",
+                DATABRICKS_SECRET_SCOPE,
+            )
+            return project_id
+        except Exception as exc:
+            logger.warning("Could not load GCP project ID from Secret Scope: %s", exc)
+
+    return os.getenv("GCP_PROJECT_ID")
+
+
 def create_bigquery_client(project_id: Optional[str] = None) -> bigquery.Client:
     """
     Build and return an authenticated BigQuery client.
 
     Args:
-        project_id: Billing project override. Defaults to BIGQUERY_BILLING_PROJECT.
+        project_id: Billing project override. Resolved from Databricks Secrets
+                    or GCP_PROJECT_ID env var when not provided.
 
     Raises:
-        RuntimeError: When no valid credentials are found.
+        RuntimeError: When no valid credentials or project ID are found.
     """
-    billing_project = project_id or BIGQUERY_BILLING_PROJECT
+    billing_project = project_id or _resolve_gcp_project_id()
+
+    if not billing_project:
+        raise RuntimeError(
+            "GCP project ID not found. Configure the Databricks Secret Scope "
+            f"('{DATABRICKS_SECRET_SCOPE}/{GCP_PROJECT_ID_SECRET_KEY}') or set "
+            "the GCP_PROJECT_ID environment variable."
+        )
 
     credentials = _credentials_from_databricks_secrets()
     if credentials is None:

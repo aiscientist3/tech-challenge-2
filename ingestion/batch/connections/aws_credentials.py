@@ -1,5 +1,5 @@
 """
-AWS credential resolution for use with the deltalake library.
+AWS credential and configuration resolution for use with the deltalake library.
 
 Credential resolution order:
 1. Databricks Secret Scope  (production — Serverless)
@@ -16,6 +16,7 @@ from typing import Any
 
 from ingestion.batch.config import (
     AWS_ACCESS_KEY_ID_SECRET,
+    AWS_S3_BUCKET_SECRET_KEY,
     AWS_SECRET_ACCESS_KEY_SECRET,
     AWS_SECRET_SCOPE,
 )
@@ -40,6 +41,39 @@ def _get_dbutils() -> Any | None:
         return IPython.get_ipython().user_ns.get("dbutils")
     except Exception:
         return None
+
+
+def resolve_s3_bucket() -> str:
+    """
+    Resolve the S3 bucket name from Databricks Secrets or environment variable.
+
+    Raises:
+        RuntimeError: When the bucket name cannot be resolved.
+    """
+    dbutils = _get_dbutils()
+    if dbutils is not None:
+        try:
+            bucket = dbutils.secrets.get(
+                scope=AWS_SECRET_SCOPE, key=AWS_S3_BUCKET_SECRET_KEY
+            )
+            logger.info(
+                "S3 bucket loaded from Databricks Secret Scope '%s'.",
+                AWS_SECRET_SCOPE,
+            )
+            return bucket
+        except Exception as exc:
+            logger.warning("Could not load S3 bucket from Secret Scope: %s", exc)
+
+    bucket = os.getenv("S3_BUCKET")
+    if bucket:
+        logger.info("S3 bucket loaded from S3_BUCKET environment variable.")
+        return bucket
+
+    raise RuntimeError(
+        "S3 bucket name not found. Configure the Databricks Secret Scope "
+        f"('{AWS_SECRET_SCOPE}/{AWS_S3_BUCKET_SECRET_KEY}') or set "
+        "the S3_BUCKET environment variable."
+    )
 
 
 def resolve_aws_storage_options() -> dict[str, str]:
