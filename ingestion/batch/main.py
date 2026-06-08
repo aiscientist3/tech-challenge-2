@@ -239,19 +239,13 @@ def _normalize_argv() -> None:
         sys.argv = [sys.argv[0]] + extra
 
 
-def main() -> int:
+def main() -> None:
     _normalize_argv()
     parser = _build_arg_parser()
     args = parser.parse_args()
-
-    try:
-        run_config = build_run_config(args)
-        run_ingestion(run_config)
-        return 0
-    except Exception as exc:
-        logger.exception("Batch ingestion failed: %s", exc)
-        return 1
+    run_config = build_run_config(args)
+    run_ingestion(run_config)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
