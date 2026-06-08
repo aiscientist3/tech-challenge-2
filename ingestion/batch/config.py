@@ -14,7 +14,7 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 # GCP / BigQuery
 # ---------------------------------------------------------------------------
-GCP_PROJECT_ID: str = os.getenv("GCP_PROJECT_ID", "fase-2-tech-challenge")
+GCP_PROJECT_ID: str = os.getenv("GCP_PROJECT_ID", "fase-2-tech-challenge-498820")
 BIGQUERY_BILLING_PROJECT: str = os.getenv("BIGQUERY_BILLING_PROJECT", GCP_PROJECT_ID)
 BIGQUERY_PUBLIC_DATASET: str = "basedosdados"
 
