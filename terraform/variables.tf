@@ -114,12 +114,15 @@ variable "job_pypi_dependencies" {
   description = "PyPI packages installed in the Serverless job environment."
   type        = list(string)
   default = [
-    "basedosdados>=2.0.0",
-    "google-cloud-bigquery>=3.25.0",
+    # Pin numeric stack first — avoids numpy/pyarrow clash with Databricks runtime
+    "numpy==1.26.4",
+    "pyarrow==15.0.2",
+    "pandas==2.2.3",
+    "db-dtypes==1.3.1",
     "google-auth>=2.29.0",
-    "pandas>=2.2.0",
+    "google-cloud-bigquery>=3.25.0",
+    "basedosdados>=2.0.0",
     "deltalake>=0.18.0",
-    "db-dtypes>=1.2.0",
   ]
 }
 

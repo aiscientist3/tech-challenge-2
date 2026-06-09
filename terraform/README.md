@@ -172,4 +172,5 @@ Warning: destroys the S3 bucket (must be empty or force-destroy enabled). Empty 
 | `dummy-arn` on instance profile | Set `register_instance_profile = false` (default for Serverless). Run full `terraform apply` without `-target`. |
 | Instance profile registration fails | Requires workspace admin + Databricks trust policy on IAM role; keep `register_instance_profile = false` for Serverless |
 | `Client-1 channel for REPL` | Use `job_environment_version = "2"` (default). Do not use deprecated `client = "1"`. |
+| `db-dtypes` / `numpy.core.multiarray` | Pin `numpy`, `pyarrow`, `pandas`, `db-dtypes` in `job_pypi_dependencies` (defaults in `variables.tf`). Run `terraform apply`. |
 | Job fails on packages | Adjust `job_pypi_dependencies` in `terraform.tfvars` |
