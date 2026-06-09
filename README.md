@@ -50,10 +50,10 @@ flowchart TD
 | Storage | AWS S3 + Delta Lake |
 | Orquestração | Databricks Workflows |
 | Credenciais GCP | Databricks Secret Scope |
-| Credenciais AWS | IAM Instance Profile |
+| Credenciais AWS | Databricks Secret Scope (Serverless) + IAM Instance Profile (cluster clássico) |
 | Qualidade de dados | Great Expectations / dbt tests *(pendente)* |
 | Monitoramento | CloudWatch + Databricks Alerts *(pendente)* |
-| IaC | Terraform *(pendente)* |
+| IaC | Terraform |
 
 ---
 
@@ -81,6 +81,14 @@ tech-challenge-2/
 │   └── batch/
 │       ├── conftest.py
 │       └── test_sources.py
+├── terraform/                      ← IaC AWS + Databricks Job
+│   ├── README.md
+│   ├── main.tf
+│   ├── modules/
+│   │   ├── s3_datalake/
+│   │   ├── iam_databricks/
+│   │   └── databricks_job/
+│   └── terraform.tfvars.example
 ├── requirements.txt
 └── README.md
 ```
@@ -95,10 +103,10 @@ tech-challenge-2/
 |---|---|---|
 | UF | `basedosdados.br_bd_diretorios_brasil.uf` | `bronze/.../uf/` |
 | Município | `basedosdados.br_bd_diretorios_brasil.municipio` | `bronze/.../municipio/` |
-| Meta Brasil | `basedosdados.br_inep_avaliacao_alfabetizacao.brasil` | `bronze/.../meta_brasil/ano=XXXX/` |
-| Meta UF | `basedosdados.br_inep_avaliacao_alfabetizacao.uf` | `bronze/.../meta_uf/ano=XXXX/` |
-| Meta Município | `basedosdados.br_inep_avaliacao_alfabetizacao.municipio` | `bronze/.../meta_municipio/ano=XXXX/` |
-| Alunos (microdados) | `basedosdados.br_inep_avaliacao_alfabetizacao.microdados` | `bronze/.../alunos/ano=XXXX/` |
+| Meta Brasil | `basedosdados.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_brasil` | `bronze/.../meta_brasil/ano=XXXX/` |
+| Meta UF | `basedosdados.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_uf` | `bronze/.../meta_uf/ano=XXXX/` |
+| Meta Município | `basedosdados.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_municipio` | `bronze/.../meta_municipio/ano=XXXX/` |
+| Alunos | `basedosdados.br_inep_avaliacao_alfabetizacao.alunos` | `bronze/.../alunos/ano=XXXX/` |
 
 ### Metadados adicionados em cada registro
 
@@ -139,7 +147,9 @@ s3://tech-challenge-2-datalake/
 ```bash
 # Criar Secret Scope "gcp" via Databricks CLI
 databricks secrets create-scope gcp
-databricks secrets put-secret gcp service-account-json \
+databricks secrets put --scope gcp --key project-id \
+    --string-value "YOUR_GCP_PROJECT_ID"
+databricks secrets put --scope gcp --key service-account-json \
     --string-value "$(cat service-account.json)"
 ```
 
@@ -147,7 +157,7 @@ Variáveis de ambiente relevantes:
 
 | Variável | Padrão | Descrição |
 |---|---|---|
-| `GCP_PROJECT_ID` | `fase-2-tech-challenge` | Projeto GCP para billing |
+| `GCP_PROJECT_ID_SECRET_KEY` | `project-id` | Chave do Secret Scope para o project ID |
 | `DATABRICKS_SECRET_SCOPE` | `gcp` | Nome do Secret Scope |
 | `DATABRICKS_SECRET_KEY` | `service-account-json` | Chave do JSON da service account |
 
@@ -160,17 +170,38 @@ export GOOGLE_APPLICATION_CREDENTIALS="/caminho/para/service-account.json"
 export GCP_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
 ```
 
-### 2. AWS — S3 (IAM Instance Profile)
+### 2. AWS — S3
 
-Associe ao cluster Databricks um **Instance Profile** com a seguinte política:
+#### Serverless (produção atual)
+
+O batch Bronze em **Databricks Serverless** usa credenciais via **Secret Scope** (IAM User + access keys provisionados pelo Terraform):
+
+```bash
+databricks secrets create-scope aws
+databricks secrets put --scope aws --key s3-bucket --string-value "YOUR_BUCKET_NAME"
+databricks secrets put --scope aws --key access-key-id --string-value "AKIA..."
+databricks secrets put --scope aws --key secret-access-key --string-value "..."
+```
+
+Após `terraform apply`, use os comandos documentados em [`terraform/README.md`](terraform/README.md).
+
+| Secret Scope | Chave | Descrição |
+|---|---|---|
+| `aws` | `s3-bucket` | Nome do bucket S3 |
+| `aws` | `access-key-id` | Access key do IAM User |
+| `aws` | `secret-access-key` | Secret key do IAM User |
+
+#### Cluster clássico (Instance Profile)
+
+Para clusters clássicos ou streaming futuro, associe o **Instance Profile** criado pelo Terraform (`tech-challenge-2-<env>-databricks-s3-profile`) ao cluster Databricks. A política S3 mínima:
 
 ```json
 {
   "Effect": "Allow",
   "Action": ["s3:PutObject", "s3:GetObject", "s3:ListBucket", "s3:DeleteObject"],
   "Resource": [
-    "arn:aws:s3:::tech-challenge-2-datalake",
-    "arn:aws:s3:::tech-challenge-2-datalake/*"
+    "arn:aws:s3:::YOUR_BUCKET_NAME",
+    "arn:aws:s3:::YOUR_BUCKET_NAME/*"
   ]
 }
 ```
@@ -179,7 +210,7 @@ Variáveis de ambiente relevantes:
 
 | Variável | Padrão | Descrição |
 |---|---|---|
-| `S3_BUCKET` | `tech-challenge-2-datalake` | Bucket de destino |
+| `S3_BUCKET` | *(via Secret Scope)* | Bucket de destino |
 | `BRONZE_PREFIX` | `bronze/br_inep_alfabetizacao` | Prefixo da camada Bronze |
 | `AWS_DEFAULT_REGION` | `us-east-1` | Região AWS |
 | `S3_ENDPOINT` | *(vazio)* | Endpoint alternativo (MinIO / LocalStack) |
@@ -252,7 +283,7 @@ python -m ingestion.batch.main --sources alunos --years 2024 --append
 - Filtrar por `ano` no BigQuery antes de transferir dados
 - Usar `--row-limit` durante desenvolvimento para reduzir custo por query
 - Particionar Delta por `ano` no S3 para varreduras seletivas
-- Configurar lifecycle policy no S3 para dados Bronze antigos *(pendente)*
+- Lifecycle policy no S3 para dados Bronze antigos (via Terraform — transição para IA após 90 dias)
 - Reservar slots BigQuery para workloads recorrentes *(a avaliar)*
 
 ---
@@ -289,10 +320,12 @@ python -m ingestion.batch.main --sources alunos --years 2024 --append
 - [ ] Databricks job alerts (e-mail/Slack)
 
 ### IaC — Terraform
-- [ ] Bucket S3 + lifecycle policies
-- [ ] IAM roles e Instance Profile
+- [x] Bucket S3 + lifecycle policies
+- [x] IAM roles e Instance Profile
+- [x] Definições de Databricks Workflows
 - [ ] Amazon MSK cluster
-- [ ] Definições de Databricks Workflows
+
+Ver [`terraform/README.md`](terraform/README.md) para aplicar a infraestrutura.
 
 ---
 
