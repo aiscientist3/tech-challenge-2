@@ -46,6 +46,12 @@ variable "instance_profile_arn" {
   type = string
 }
 
+variable "job_environment_version" {
+  type        = string
+  default     = "2"
+  description = "Serverless environment version. Use 2+; avoid deprecated client=1."
+}
+
 locals {
   environment_key = "Default"
 }

@@ -171,4 +171,5 @@ Warning: destroys the S3 bucket (must be empty or force-destroy enabled). Empty 
 | Databricks job cannot pull Git | Connect GitHub in Databricks **Settings → Linked accounts → Git integration** |
 | `dummy-arn` on instance profile | Set `register_instance_profile = false` (default for Serverless). Run full `terraform apply` without `-target`. |
 | Instance profile registration fails | Requires workspace admin + Databricks trust policy on IAM role; keep `register_instance_profile = false` for Serverless |
+| `Client-1 channel for REPL` | Use `job_environment_version = "2"` (default). Do not use deprecated `client = "1"`. |
 | Job fails on packages | Adjust `job_pypi_dependencies` in `terraform.tfvars` |

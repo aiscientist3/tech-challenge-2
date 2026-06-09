@@ -35,6 +35,7 @@ module "databricks_job" {
   job_parameters            = var.job_parameters
   job_timeout_seconds       = var.job_timeout_seconds
   job_pypi_dependencies     = var.job_pypi_dependencies
+  job_environment_version   = var.job_environment_version
   enable_job_schedule       = var.enable_job_schedule
   job_schedule_cron         = var.job_schedule_cron
   register_instance_profile = var.register_instance_profile

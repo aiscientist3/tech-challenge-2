@@ -31,8 +31,8 @@ resource "databricks_job" "bronze_batch" {
     environment_key = local.environment_key
 
     spec {
-      client         = "1"
-      dependencies   = var.job_pypi_dependencies
+      environment_version = var.job_environment_version
+      dependencies        = var.job_pypi_dependencies
     }
   }
 

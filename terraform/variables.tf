@@ -123,6 +123,12 @@ variable "job_pypi_dependencies" {
   ]
 }
 
+variable "job_environment_version" {
+  description = "Serverless environment version for the Databricks job (use 2+, not deprecated client=1)."
+  type        = string
+  default     = "2"
+}
+
 variable "enable_job_schedule" {
   description = "Whether to enable a cron schedule for the Databricks job."
   type        = bool
