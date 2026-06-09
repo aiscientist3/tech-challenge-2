@@ -1,0 +1,32 @@
+# Copy to terraform.tfvars and fill in values. Never commit terraform.tfvars.
+#
+# export TF_VAR_databricks_token="dapi..."
+
+project_name = "tech-challenge-2"
+environment  = "dev"
+aws_region   = "us-east-1"
+
+# Optional: set an explicit globally-unique bucket name.
+# bucket_name = "tech-challenge-2-datalake-dev"
+
+databricks_host = "https://YOUR-WORKSPACE.cloud.databricks.com"
+
+git_repo_url = "https://github.com/aiscientist3/tech-challenge-2.git"
+git_branch   = "main"
+
+# Production — full ingestion
+job_parameters = ["--sources", "all", "--years", "2023,2024"]
+
+# Development — limit rows per source
+# job_parameters = ["--sources", "all", "--years", "2023,2024", "--row-limit", "5000"]
+
+# Optional scheduled run (disabled by default)
+# enable_job_schedule = true
+# job_schedule_cron   = "0 0 6 * * ?"
+
+# Serverless (current pipeline): keep false. Enable only for classic clusters with Databricks trust on the IAM role.
+register_instance_profile = false
+
+tags = {
+  Team = "tech-challenge-2"
+}
