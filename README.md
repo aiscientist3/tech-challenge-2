@@ -52,7 +52,7 @@ flowchart TD
 | Credenciais GCP | Databricks Secret Scope |
 | Credenciais AWS | Databricks Secret Scope (Serverless) + IAM Instance Profile (cluster clássico) |
 | Qualidade de dados | Great Expectations / dbt tests *(pendente)* |
-| Monitoramento | CloudWatch + Databricks Alerts *(pendente)* |
+| Monitoramento | CloudWatch + Databricks email alerts |
 | IaC | Terraform |
 
 ---
@@ -315,9 +315,11 @@ python -m ingestion.batch.main --sources alunos --years 2024 --append
 - [ ] Alertas automáticos em falhas de qualidade
 
 ### Monitoramento
-- [ ] Métricas de execução por job (registros, duração, falhas)
-- [ ] CloudWatch Alarms
-- [ ] Databricks job alerts (e-mail/Slack)
+- [x] Métricas de execução por job (registros, duração, falhas) — CloudWatch custom metrics + dashboard
+- [x] CloudWatch Alarms — falha, duração, zero registros, S3 5xx
+- [x] Databricks job alerts (e-mail)
+
+Ver [`terraform/README.md`](terraform/README.md#monitoring) para configurar `alert_email` e confirmar a subscrição SNS.
 
 ### IaC — Terraform
 - [x] Bucket S3 + lifecycle policies

@@ -46,6 +46,24 @@ variable "instance_profile_arn" {
   type = string
 }
 
+variable "alert_emails" {
+  type        = list(string)
+  default     = []
+  description = "Email addresses for Databricks job failure/success notifications."
+}
+
+variable "alert_on_success" {
+  type        = bool
+  default     = false
+  description = "Send Databricks email notification when the job succeeds."
+}
+
+variable "job_duration_warning_seconds" {
+  type        = number
+  default     = 0
+  description = "Trigger Databricks duration warning when runtime exceeds this value (seconds). 0 disables."
+}
+
 variable "job_environment_version" {
   type        = string
   default     = "2"

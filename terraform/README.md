@@ -5,6 +5,7 @@ Infrastructure as Code for the literacy data pipeline:
 - **S3 datalake** with encryption, versioning, lifecycle rules, and medallion layout placeholders
 - **IAM dual access**: programmatic user (Serverless + Secret Scope) and instance profile (classic compute)
 - **Databricks Job** for Bronze batch ingestion from Git
+- **Monitoring**: CloudWatch dashboard/alarms, SNS email alerts, Databricks job email notifications
 
 MSK and remote Terraform state backend are out of scope for this module set.
 
@@ -60,8 +61,40 @@ terraform/
 └── modules/
     ├── s3_datalake/        # Bucket, lifecycle, medallion placeholders
     ├── iam_databricks/     # IAM user + keys, role + instance profile
-    └── databricks_job/     # Serverless Git job + instance profile registration
+    ├── databricks_job/     # Serverless Git job + email alerts
+    └── monitoring/         # CloudWatch dashboard, alarms, SNS email
 ```
+
+## Monitoring
+
+Monitoring combines **Terraform** (infra alerts) and **application metrics** (Python publishes custom CloudWatch metrics at the end of each run).
+
+| Component | Provisioned by | What it monitors |
+|---|---|---|
+| Databricks job email | Terraform (`databricks_job`) | Job failure (+ optional success / duration warning) |
+| SNS + email subscription | Terraform (`monitoring`) | CloudWatch alarm notifications |
+| CloudWatch alarms | Terraform (`monitoring`) | `JobFailure`, `DurationSeconds`, `RecordsIngested`, S3 `5xxErrors` |
+| CloudWatch dashboard | Terraform (`monitoring`) | Records, duration, sources, failures |
+| Custom metrics | Python (`ingestion/batch/metrics.py`) | Publishes metrics after each job run |
+
+### Setup
+
+1. Set `alert_email` in `terraform.tfvars` (required when `enable_monitoring = true`).
+2. Run `terraform apply`.
+3. **Confirm the SNS subscription** — AWS sends a confirmation email; click the link before alarms work.
+4. Push the latest Python code so the job publishes metrics (`RecordsIngested`, `DurationSeconds`, etc.).
+5. Re-sync IAM user secrets if Terraform recreated the access key (includes `cloudwatch:PutMetricData`).
+
+### Databricks email notes
+
+- Recipients must be **valid users in the Databricks workspace** (or configured notification addresses).
+- Only email is configured — no Slack/webhooks.
+
+### Metric namespace
+
+Default namespace: `TechChallenge2/BatchIngestion` with dimension `Environment=<environment>`.
+
+Override in the job with environment variable `CLOUDWATCH_METRIC_NAMESPACE` if needed.
 
 ## Post-apply: sync Databricks secrets
 
@@ -123,7 +156,12 @@ databricks secrets put --scope gcp --key service-account-json \
 | `git_branch` | `main` | Branch for the job |
 | `job_parameters` | `["--sources","all","--years","2023,2024"]` | CLI args for `main.py` |
 | `enable_job_schedule` | `false` | Enable cron schedule |
-| `register_instance_profile` | `true` | Register IAM instance profile in Databricks |
+| `register_instance_profile` | `false` | Register IAM instance profile in Databricks |
+| `enable_monitoring` | `true` | CloudWatch + SNS + Databricks email alerts |
+| `alert_email` | — | Email for alerts (required if monitoring enabled) |
+| `alert_on_success` | `false` | Email on successful job runs |
+| `job_duration_alarm_seconds` | `3600` | CloudWatch alarm if ingestion is slower than this |
+| `job_duration_warning_seconds` | `3000` | Databricks duration warning email threshold |
 
 See [`terraform.tfvars.example`](terraform.tfvars.example) for a full template.
 
@@ -137,6 +175,8 @@ See [`terraform.tfvars.example`](terraform.tfvars.example) for a full template.
 | `instance_profile_arn` | For classic Databricks clusters |
 | `databricks_job_id` | Bronze ingestion job ID |
 | `databricks_job_url` | Link to job in workspace |
+| `monitoring_dashboard_url` | CloudWatch dashboard URL |
+| `monitoring_sns_topic_arn` | SNS topic for alarm emails |
 | `secrets_sync_commands` | Hint commands for secret sync |
 
 ## Remote state (optional)
@@ -174,3 +214,5 @@ Warning: destroys the S3 bucket (must be empty or force-destroy enabled). Empty 
 | `Client-1 channel for REPL` | Use `job_environment_version = "2"` (default). Do not use deprecated `client = "1"`. |
 | `db-dtypes` / `numpy.core.multiarray` | Pin `numpy`, `pyarrow`, `pandas`, `db-dtypes` in `job_pypi_dependencies` (defaults in `variables.tf`). Run `terraform apply`. |
 | Job fails on packages | Adjust `job_pypi_dependencies` in `terraform.tfvars` |
+| SNS alerts not received | Confirm the SNS email subscription in your inbox after `terraform apply` |
+| CloudWatch metrics empty | Ensure job code includes `metrics.py`; IAM user has `cloudwatch:PutMetricData` |

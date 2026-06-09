@@ -27,6 +27,13 @@ job_parameters = ["--sources", "all", "--years", "2023,2024"]
 # Serverless (current pipeline): keep false. Enable only for classic clusters with Databricks trust on the IAM role.
 register_instance_profile = false
 
+# Monitoring — email alerts (Databricks + CloudWatch SNS)
+enable_monitoring = true
+alert_email       = "you@example.com"
+# alert_on_success = false
+# job_duration_alarm_seconds   = 3600
+# job_duration_warning_seconds = 3000
+
 tags = {
   Team = "tech-challenge-2"
 }

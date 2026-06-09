@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
+import time
 import uuid
 from typing import Any
 
@@ -31,6 +33,7 @@ from ingestion.batch.connections.aws_credentials import (
     resolve_s3_bucket,
 )
 from ingestion.batch.connections.bigquery_client import create_bigquery_client
+from ingestion.batch.metrics import publish_ingestion_metrics
 from ingestion.batch.sources import SOURCE_REGISTRY
 
 logging.basicConfig(
@@ -215,6 +218,7 @@ def run_ingestion(run_config: IngestionRunConfig) -> dict[str, str | None]:
     logger.info("S3 bucket  : %s", bucket)
 
     results: dict[str, str | None] = {}
+    record_counts: dict[str, int] = {}
 
     for source_name in run_config.sources:
         source_config = source_configs[source_name]
@@ -233,6 +237,7 @@ def run_ingestion(run_config: IngestionRunConfig) -> dict[str, str | None]:
             overwrite=run_config.overwrite,
         )
         results[source_name] = destination
+        record_counts[source_name] = len(df)
         logger.info(
             "Source '%s' done. Records: %d. Destination: %s",
             source_name,
@@ -241,7 +246,7 @@ def run_ingestion(run_config: IngestionRunConfig) -> dict[str, str | None]:
         )
 
     logger.info("=== BATCH INGESTION COMPLETED ===")
-    return results
+    return results, record_counts
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +270,33 @@ def main() -> None:
     parser = _build_arg_parser()
     args = parser.parse_args()
     run_config = build_run_config(args)
-    run_ingestion(run_config)
+
+    if not run_config.batch_id:
+        run_config.batch_id = str(uuid.uuid4())
+
+    environment = os.getenv("ENVIRONMENT", "prod")
+    started_at = time.monotonic()
+    record_counts: dict[str, int] = {}
+
+    try:
+        _results, record_counts = run_ingestion(run_config)
+    except Exception:
+        publish_ingestion_metrics(
+            batch_id=run_config.batch_id,
+            environment=environment,
+            record_counts=record_counts,
+            duration_seconds=time.monotonic() - started_at,
+            success=False,
+        )
+        raise
+
+    publish_ingestion_metrics(
+        batch_id=run_config.batch_id,
+        environment=environment,
+        record_counts=record_counts,
+        duration_seconds=time.monotonic() - started_at,
+        success=True,
+    )
 
 
 if __name__ == "__main__":

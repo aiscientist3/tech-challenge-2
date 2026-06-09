@@ -17,29 +17,48 @@ module "s3_datalake" {
 module "iam_databricks" {
   source = "./modules/iam_databricks"
 
-  project_name = var.project_name
-  environment  = var.environment
-  bucket_arn   = module.s3_datalake.bucket_arn
-  bucket_name  = module.s3_datalake.bucket_name
-  tags         = local.common_tags
+  project_name              = var.project_name
+  environment               = var.environment
+  bucket_arn                = module.s3_datalake.bucket_arn
+  bucket_name               = module.s3_datalake.bucket_name
+  enable_cloudwatch_metrics = var.enable_monitoring
+  tags                      = local.common_tags
+}
+
+module "monitoring" {
+  count  = var.enable_monitoring ? 1 : 0
+  source = "./modules/monitoring"
+
+  project_name               = var.project_name
+  environment                = var.environment
+  aws_region                 = var.aws_region
+  bucket_name                = module.s3_datalake.bucket_name
+  alert_email                = var.alert_email
+  metric_namespace           = var.metric_namespace
+  job_duration_alarm_seconds = var.job_duration_alarm_seconds
+  enable_s3_error_alarm      = var.enable_s3_error_alarm
+  tags                       = local.common_tags
 }
 
 module "databricks_job" {
   source = "./modules/databricks_job"
 
-  job_name                  = var.job_name
-  git_repo_url              = var.git_repo_url
-  git_branch                = var.git_branch
-  git_provider              = var.git_provider
-  job_python_file           = var.job_python_file
-  job_parameters            = var.job_parameters
-  job_timeout_seconds       = var.job_timeout_seconds
-  job_pypi_dependencies     = var.job_pypi_dependencies
-  job_environment_version   = var.job_environment_version
-  enable_job_schedule       = var.enable_job_schedule
-  job_schedule_cron         = var.job_schedule_cron
-  register_instance_profile = var.register_instance_profile
-  instance_profile_arn      = module.iam_databricks.instance_profile_arn
+  job_name                     = var.job_name
+  git_repo_url                 = var.git_repo_url
+  git_branch                   = var.git_branch
+  git_provider                 = var.git_provider
+  job_python_file              = var.job_python_file
+  job_parameters               = var.job_parameters
+  job_timeout_seconds          = var.job_timeout_seconds
+  job_pypi_dependencies        = var.job_pypi_dependencies
+  job_environment_version      = var.job_environment_version
+  enable_job_schedule          = var.enable_job_schedule
+  job_schedule_cron            = var.job_schedule_cron
+  register_instance_profile    = var.register_instance_profile
+  instance_profile_arn         = module.iam_databricks.instance_profile_arn
+  alert_emails                 = var.enable_monitoring && var.alert_email != "" ? [var.alert_email] : []
+  alert_on_success             = var.alert_on_success
+  job_duration_warning_seconds = var.job_duration_warning_seconds
 
   providers = {
     databricks = databricks

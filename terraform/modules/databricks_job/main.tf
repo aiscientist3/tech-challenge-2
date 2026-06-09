@@ -57,4 +57,27 @@ resource "databricks_job" "bronze_batch" {
   }
 
   max_concurrent_runs = 1
+
+  dynamic "health" {
+    for_each = length(var.alert_emails) > 0 && var.job_duration_warning_seconds > 0 ? [1] : []
+    content {
+      rules {
+        metric = "RUN_DURATION_SECONDS"
+        op     = "GREATER_THAN"
+        value  = var.job_duration_warning_seconds
+      }
+    }
+  }
+
+  dynamic "email_notifications" {
+    for_each = length(var.alert_emails) > 0 ? [1] : []
+    content {
+      on_failure = var.alert_emails
+      on_success = var.alert_on_success ? var.alert_emails : []
+      on_duration_warning_threshold_exceeded = (
+        var.job_duration_warning_seconds > 0 ? var.alert_emails : []
+      )
+      no_alert_for_skipped_runs = true
+    }
+  }
 }

@@ -68,3 +68,13 @@ output "secrets_sync_commands" {
     databricks secrets put --scope aws --key secret-access-key --string-value "<run: terraform output -raw secret_access_key>"
   EOT
 }
+
+output "monitoring_sns_topic_arn" {
+  description = "SNS topic ARN for pipeline alerts (when monitoring is enabled)."
+  value       = var.enable_monitoring ? module.monitoring[0].sns_topic_arn : null
+}
+
+output "monitoring_dashboard_url" {
+  description = "CloudWatch dashboard URL for batch ingestion metrics."
+  value       = var.enable_monitoring ? module.monitoring[0].cloudwatch_dashboard_url : null
+}

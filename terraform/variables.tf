@@ -123,6 +123,7 @@ variable "job_pypi_dependencies" {
     "google-cloud-bigquery>=3.25.0",
     "basedosdados>=2.0.0",
     "deltalake>=0.18.0",
+    "boto3>=1.34.0",
   ]
 }
 
@@ -154,4 +155,46 @@ variable "tags" {
   description = "Additional tags applied to all AWS resources."
   type        = map(string)
   default     = {}
+}
+
+variable "enable_monitoring" {
+  description = "Provision CloudWatch alarms, dashboard, and SNS email alerts."
+  type        = bool
+  default     = true
+}
+
+variable "alert_email" {
+  description = "Email address for CloudWatch SNS and Databricks job notifications."
+  type        = string
+  default     = ""
+}
+
+variable "alert_on_success" {
+  description = "Send Databricks email when the batch job succeeds."
+  type        = bool
+  default     = false
+}
+
+variable "metric_namespace" {
+  description = "CloudWatch namespace for custom batch ingestion metrics."
+  type        = string
+  default     = "TechChallenge2/BatchIngestion"
+}
+
+variable "job_duration_alarm_seconds" {
+  description = "CloudWatch alarm threshold for ingestion duration (seconds)."
+  type        = number
+  default     = 3600
+}
+
+variable "job_duration_warning_seconds" {
+  description = "Databricks job duration warning threshold (seconds). 0 disables."
+  type        = number
+  default     = 3000
+}
+
+variable "enable_s3_error_alarm" {
+  description = "Enable CloudWatch alarm for S3 5xx errors on the datalake bucket."
+  type        = bool
+  default     = true
 }
