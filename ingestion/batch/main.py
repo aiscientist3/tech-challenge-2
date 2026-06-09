@@ -2,8 +2,8 @@
 Batch ingestion entry point — Bronze layer.
 
 Supports two invocation styles:
-  1. Databricks Widgets (when running inside a Databricks Job)
-  2. CLI arguments (local development or CI)
+  1. CLI arguments (Databricks Jobs, local development, CI) — preferred
+  2. Databricks Widgets (interactive notebooks only)
 
 CLI usage:
   python -m ingestion.batch.main --sources all --years 2023,2024
@@ -64,8 +64,18 @@ def _get_dbutils() -> Any | None:
         return None
 
 
+def _cli_args_provided() -> bool:
+    """Return True when explicit CLI flags were passed (Job or local invocation)."""
+    argv = sys.argv[1:]
+    if len(argv) == 1 and argv[0].startswith("--"):
+        import shlex
+
+        argv = shlex.split(argv[0])
+    return any(arg.startswith("--") for arg in argv)
+
+
 def _config_from_widgets() -> IngestionRunConfig | None:
-    """Build IngestionRunConfig from Databricks widgets when available."""
+    """Build IngestionRunConfig from Databricks notebook widgets when defined."""
     dbutils = _get_dbutils()
     if dbutils is None:
         return None
@@ -85,7 +95,10 @@ def _config_from_widgets() -> IngestionRunConfig | None:
             overwrite=overwrite_raw != "false",
         )
     except Exception as exc:
-        logger.warning("Could not read Databricks widgets: %s", exc)
+        if "InputWidgetNotDefined" in type(exc).__name__ or "InputWidgetNotDefined" in str(exc):
+            logger.debug("Databricks widgets not defined — using CLI/default config.")
+        else:
+            logger.warning("Could not read Databricks widgets: %s", exc)
         return None
 
 
@@ -147,20 +160,28 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def build_run_config(args: argparse.Namespace | None = None) -> IngestionRunConfig:
-    """Resolve run configuration from widgets (Databricks) or CLI args."""
+    """Resolve run configuration from CLI args (Job/local) or notebook widgets."""
+    if args is not None or _cli_args_provided():
+        resolved = args if args is not None else _build_arg_parser().parse_args()
+        return IngestionRunConfig(
+            years=_parse_years(resolved.years),
+            sources=_parse_sources(resolved.sources),
+            batch_id=resolved.batch_id,
+            row_limit=resolved.row_limit,
+            overwrite=not resolved.append,
+        )
+
     widget_config = _config_from_widgets()
     if widget_config is not None:
         return widget_config
 
-    if args is None:
-        args = _build_arg_parser().parse_args()
-
+    resolved = _build_arg_parser().parse_args()
     return IngestionRunConfig(
-        years=_parse_years(args.years),
-        sources=_parse_sources(args.sources),
-        batch_id=args.batch_id,
-        row_limit=args.row_limit,
-        overwrite=not args.append,
+        years=_parse_years(resolved.years),
+        sources=_parse_sources(resolved.sources),
+        batch_id=resolved.batch_id,
+        row_limit=resolved.row_limit,
+        overwrite=not resolved.append,
     )
 
 
