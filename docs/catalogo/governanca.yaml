@@ -1,0 +1,35 @@
+# Governança do catálogo de dados — Tech Challenge Fase 2
+# Contexto: trabalho de pós-graduação (sem domínios corporativos formais)
+
+version: "1.0"
+projeto:
+  nome: Pipeline Híbrido — Análise da Alfabetização no Brasil
+  repositorio: tech-challenge-2
+
+dominio_negocio:
+  id: metas_inep
+  nome: Metas INEP
+  descricao: >
+    Dados da Avaliação da Alfabetização e metas do Compromisso Nacional
+    Criança Alfabetizada, publicados pelo Inep via Base dos Dados.
+
+governanca:
+  data_owner:
+    nome: AI Scientist
+    email: aiscientist3@gmail.com
+  data_stewards:
+    - Samuel Porto
+    - Walter Ferreira
+    - Amanda Rarymi
+  classificacao_padrao: Publica
+  contem_dado_pessoal_padrao: false
+  observacao: >
+    Projeto acadêmico. IDs de aluno e escola na fonte INEP utilizam códigos
+    mascarados/fictícios; não há identificação direta de pessoa natural.
+
+stack:
+  fonte: Google BigQuery (Base dos Dados)
+  ingestao: Databricks Job (Python)
+  armazenamento: AWS S3 + Delta Lake
+  orquestracao: Databricks Workflows
+  iac: Terraform

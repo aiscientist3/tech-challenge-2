@@ -1,0 +1,304 @@
+# Catálogo de dados — entidade: municipio
+# Camada Bronze | Referência territorial de municípios (IBGE)
+# Nota: distinta de br_inep_avaliacao_alfabetizacao.municipio (indicadores — ver municipio_indicadores)
+
+version: "1.0"
+status: completo
+
+entity:
+  id: municipio
+  nome: Municípios
+  nome_tecnico: municipio
+  descricao: >
+    Diretório de referência dos municípios brasileiros, com identificadores IBGE
+    e de outros órgãos, hierarquia geográfica (regiões, microrregiões, etc.),
+    vínculo com UF e centróide. Utilizado para enriquecimento territorial das
+    entidades INEP na camada Silver.
+  dominio_negocio: Metas INEP
+  tipo: referencia
+  granularidade: "1 linha por município"
+  periodicidade: esporadica
+  contem_dado_pessoal: false
+  classificacao: Publica
+  observacao: >
+    Fonte br_bd_diretorios_brasil.municipio (Base dos Dados). Não confundir com
+    br_inep_avaliacao_alfabetizacao.municipio, catalogada como municipio_indicadores.
+
+governanca:
+  data_owner:
+    nome: AI Scientist
+    email: aiscientist3@gmail.com
+  data_stewards:
+    - Samuel Porto
+    - Walter Ferreira
+    - Amanda Rarymi
+
+origem:
+  provedor: Base dos Dados
+  sistema: Google BigQuery
+  dataset: br_bd_diretorios_brasil
+  tabela: municipio
+  tabela_completa: basedosdados.br_bd_diretorios_brasil.municipio
+  documentacao:
+    - https://basedosdados.org/dataset/br-bd-diretorios-brasil-municipio
+
+destino:
+  camada: bronze
+  formato: delta_lake
+  particionamento: null
+  caminho_relativo: bronze/br_inep_alfabetizacao/municipio/
+  caminho_exemplo: s3://{bucket}/bronze/br_inep_alfabetizacao/municipio/
+
+ingestao:
+  pipeline: ingestion/batch/main.py
+  source_code: ingestion/batch/sources/municipio.py
+  filtro_ano: false
+  modo_escrita: overwrite
+  colunas_origem: SELECT *
+
+chaves:
+  candidata_negocio:
+    - id_municipio
+  estrangeiras_sugeridas:
+    - coluna: id_uf
+      referencia: uf.id_uf
+      descricao: Vínculo com diretório de UFs
+    - coluna: sigla_uf
+      referencia: uf.sigla
+      descricao: Vínculo alternativo com diretório de UFs
+
+colunas:
+  - nome: id_municipio
+    tipo: STRING
+    nullable: true
+    descricao: ID Município - IBGE 7 Dígitos
+    chave: true
+    pii: false
+
+  - nome: id_municipio_6
+    tipo: STRING
+    nullable: true
+    descricao: ID Município - IBGE 6 Dígitos
+    chave: false
+    pii: false
+
+  - nome: id_municipio_tse
+    tipo: STRING
+    nullable: true
+    descricao: ID Município - Tribunal Superior Eleitoral (TSE)
+    chave: false
+    pii: false
+
+  - nome: id_municipio_rf
+    tipo: STRING
+    nullable: true
+    descricao: ID Município - Receita Federal (RF)
+    chave: false
+    pii: false
+
+  - nome: id_municipio_bcb
+    tipo: STRING
+    nullable: true
+    descricao: ID Município - Banco Central do Brasil (BCB)
+    chave: false
+    pii: false
+
+  - nome: nome
+    tipo: STRING
+    nullable: true
+    descricao: Nome do Município
+    chave: false
+    pii: false
+
+  - nome: capital_uf
+    tipo: INTEGER
+    nullable: true
+    descricao: Município é a Capital da Unidade da Federação
+    chave: false
+    pii: false
+
+  - nome: id_comarca
+    tipo: STRING
+    nullable: true
+    descricao: ID Sede Comarca
+    chave: false
+    pii: false
+
+  - nome: id_regiao_saude
+    tipo: STRING
+    nullable: true
+    descricao: ID Região de Saúde
+    chave: false
+    pii: false
+
+  - nome: nome_regiao_saude
+    tipo: STRING
+    nullable: true
+    descricao: Nome da Região de Saúde
+    chave: false
+    pii: false
+
+  - nome: id_regiao_imediata
+    tipo: STRING
+    nullable: true
+    descricao: ID Região Imediata - IBGE
+    chave: false
+    pii: false
+
+  - nome: nome_regiao_imediata
+    tipo: STRING
+    nullable: true
+    descricao: Nome da Região Imediata
+    chave: false
+    pii: false
+
+  - nome: id_regiao_intermediaria
+    tipo: STRING
+    nullable: true
+    descricao: ID Região Intermediária - IBGE
+    chave: false
+    pii: false
+
+  - nome: nome_regiao_intermediaria
+    tipo: STRING
+    nullable: true
+    descricao: Nome da Região Intermediária
+    chave: false
+    pii: false
+
+  - nome: id_microrregiao
+    tipo: STRING
+    nullable: true
+    descricao: ID Microrregião - IBGE
+    chave: false
+    pii: false
+
+  - nome: nome_microrregiao
+    tipo: STRING
+    nullable: true
+    descricao: Nome da Microrregião
+    chave: false
+    pii: false
+
+  - nome: id_mesorregiao
+    tipo: STRING
+    nullable: true
+    descricao: ID Mesorregião - IBGE
+    chave: false
+    pii: false
+
+  - nome: nome_mesorregiao
+    tipo: STRING
+    nullable: true
+    descricao: Nome da Mesorregião
+    chave: false
+    pii: false
+
+  - nome: id_regiao_metropolitana
+    tipo: STRING
+    nullable: true
+    descricao: ID Região Metropolitana - IBGE
+    chave: false
+    pii: false
+
+  - nome: nome_regiao_metropolitana
+    tipo: STRING
+    nullable: true
+    descricao: Nome da Região Metropolitana
+    chave: false
+    pii: false
+
+  - nome: ddd
+    tipo: STRING
+    nullable: true
+    descricao: Código de Discagem Direta a Distância (DDD)
+    chave: false
+    pii: false
+
+  - nome: id_uf
+    tipo: STRING
+    nullable: true
+    descricao: ID da Unidade da Federação - IBGE
+    chave: false
+    pii: false
+
+  - nome: sigla_uf
+    tipo: STRING
+    nullable: true
+    descricao: Sigla da Unidade da Federação
+    chave: false
+    pii: false
+
+  - nome: nome_uf
+    tipo: STRING
+    nullable: true
+    descricao: Nome da Unidade da Federação
+    chave: false
+    pii: false
+
+  - nome: nome_regiao
+    tipo: STRING
+    nullable: true
+    descricao: Nome da Grande Região Brasileira
+    chave: false
+    pii: false
+
+  - nome: amazonia_legal
+    tipo: INTEGER
+    nullable: true
+    descricao: Indicador se o município faz parte da Amazônia Legal
+    chave: false
+    pii: false
+
+  - nome: centroide
+    tipo: GEOGRAPHY
+    nullable: true
+    descricao: Centróide do município
+    chave: false
+    pii: false
+
+colunas_tecnicas_ingestao:
+  - nome: _ingestion_timestamp
+    tipo: STRING
+    descricao: Data/hora UTC da ingestão (ISO 8601)
+    origem: pipeline
+  - nome: _source_table
+    tipo: STRING
+    descricao: Tabela de origem no BigQuery
+    origem: pipeline
+  - nome: _batch_id
+    tipo: STRING
+    descricao: UUID único do lote de ingestão
+    origem: pipeline
+
+qualidade:
+  regras:
+    - id: municipio_id_obrigatorio
+      tipo: completude
+      coluna: id_municipio
+      descricao: Coluna id_municipio não deve ser nula
+    - id: municipio_nome_obrigatorio
+      tipo: completude
+      coluna: nome
+      descricao: Coluna nome não deve ser nula
+    - id: municipio_id_unico
+      tipo: unicidade
+      coluna: id_municipio
+      descricao: ID município IBGE único por carga
+    - id: municipio_id_formato
+      tipo: dominio
+      coluna: id_municipio
+      descricao: ID município com 7 dígitos numéricos
+  status_implementacao: documentado
+
+lineage:
+  upstream:
+    - basedosdados.br_bd_diretorios_brasil.municipio
+  downstream_planejado:
+    - silver.municipio
+    - silver.meta_municipio
+    - silver.alunos
+
+contrato_dados:
+  frequencia_carga: conforme agendamento Databricks Job
+  sla_freshness: a_definir

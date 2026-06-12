@@ -1,0 +1,219 @@
+# Catálogo de dados — entidade: uf_indicadores
+# Tabela INEP: br_inep_avaliacao_alfabetizacao.uf
+# Nota: distinta de br_bd_diretorios_brasil.uf (referência territorial ingerida no pipeline)
+
+version: "1.0"
+status: completo
+
+entity:
+  id: uf_indicadores
+  nome: UF — Indicadores da Avaliação
+  nome_tecnico: uf
+  descricao: >
+    Indicadores agregados da Avaliação da Alfabetização em nível estadual (UF),
+    segmentados por ano escolar (série) e rede de ensino. Inclui taxa de
+    alfabetização, média de Língua Portuguesa (escala SAEB) e distribuição
+    de alunos por níveis de desempenho (0 a 8).
+  dominio_negocio: Metas INEP
+  tipo: indicador
+  granularidade: "1 linha por ano, UF, série e rede de ensino"
+  periodicidade: anual
+  contem_dado_pessoal: false
+  classificacao: Publica
+  observacao: >
+    Tabela basedosdados.br_inep_avaliacao_alfabetizacao.uf.
+    O pipeline batch ingere br_bd_diretorios_brasil.uf (referência
+    territorial) no path bronze/.../uf/. Esta tabela de indicadores
+    não está no pipeline atual.
+
+governanca:
+  data_owner:
+    nome: AI Scientist
+    email: aiscientist3@gmail.com
+  data_stewards:
+    - Samuel Porto
+    - Walter Ferreira
+    - Amanda Rarymi
+
+origem:
+  provedor: Base dos Dados
+  sistema: Google BigQuery
+  dataset: br_inep_avaliacao_alfabetizacao
+  tabela: uf
+  tabela_completa: basedosdados.br_inep_avaliacao_alfabetizacao.uf
+  documentacao:
+    - https://basedosdados.org/dataset/073a39d4-89cf-4068-b1e8-34ed0d9c0b72
+    - https://www.gov.br/inep/pt-br/areas-de-atuacao/pesquisas-e-avaliacao/avaliacao-da-alfabetizacao
+
+destino:
+  camada: bronze
+  formato: delta_lake
+  particionamento:
+    coluna: ano
+    tipo: hive_style
+  caminho_relativo: bronze/br_inep_alfabetizacao/uf_indicadores/
+  observacao: Path sugerido — entidade ainda não ingerida pelo pipeline batch
+
+ingestao:
+  no_pipeline: true
+  observacao: >
+    Pipeline atual grava br_bd_diretorios_brasil.uf em
+    bronze/.../uf/. Inclusão desta tabela é evolução futura.
+
+chaves:
+  candidata_negocio:
+    - ano
+    - sigla_uf
+    - serie
+    - rede
+  estrangeiras_sugeridas:
+    - coluna: sigla_uf
+      referencia: uf.sigla
+      descricao: Vínculo com diretório territorial (br_bd_diretorios_brasil.uf)
+
+colunas:
+  - nome: ano
+    tipo: INTEGER
+    nullable: true
+    descricao: Ano de aplicação da avaliação estadual
+    chave: true
+    pii: false
+
+  - nome: sigla_uf
+    tipo: STRING
+    nullable: true
+    descricao: Sigla da unidade da federação
+    chave: true
+    pii: false
+
+  - nome: serie
+    tipo: STRING
+    nullable: true
+    descricao: Ano escolar
+    chave: true
+    pii: false
+
+  - nome: rede
+    tipo: STRING
+    nullable: true
+    descricao: Rede de ensino avaliada para construção do resultado
+    chave: true
+    pii: false
+
+  - nome: taxa_alfabetizacao
+    tipo: FLOAT
+    nullable: true
+    descricao: >
+      Percentual dos alunos avaliados no estado considerados alfabetizados
+      na avaliação estadual
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: media_portugues
+    tipo: FLOAT
+    nullable: true
+    descricao: >
+      Média ponderada do estado na avaliação estadual em Língua Portuguesa,
+      equalizada com o SAEB
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: proporcao_aluno_nivel_0
+    tipo: FLOAT
+    nullable: true
+    descricao: Percentual de alunos no nível de desempenho 0
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: proporcao_aluno_nivel_1
+    tipo: FLOAT
+    nullable: true
+    descricao: Percentual de alunos no nível de desempenho 1
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: proporcao_aluno_nivel_2
+    tipo: FLOAT
+    nullable: true
+    descricao: Percentual de alunos no nível de desempenho 2
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: proporcao_aluno_nivel_3
+    tipo: FLOAT
+    nullable: true
+    descricao: Percentual de alunos no nível de desempenho 3
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: proporcao_aluno_nivel_4
+    tipo: FLOAT
+    nullable: true
+    descricao: Percentual de alunos no nível de desempenho 4
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: proporcao_aluno_nivel_5
+    tipo: FLOAT
+    nullable: true
+    descricao: Percentual de alunos no nível de desempenho 5
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: proporcao_aluno_nivel_6
+    tipo: FLOAT
+    nullable: true
+    descricao: Percentual de alunos no nível de desempenho 6
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: proporcao_aluno_nivel_7
+    tipo: FLOAT
+    nullable: true
+    descricao: Percentual de alunos no nível de desempenho 7
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: proporcao_aluno_nivel_8
+    tipo: FLOAT
+    nullable: true
+    descricao: Percentual de alunos no nível de desempenho 8
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+qualidade:
+  regras:
+    - id: uf_ind_ano_obrigatorio
+      tipo: completude
+      coluna: ano
+      descricao: Coluna ano não deve ser nula
+    - id: uf_ind_chave_unica
+      tipo: unicidade
+      colunas: [ano, sigla_uf, serie, rede]
+      descricao: Combinação ano + UF + série + rede única por carga
+    - id: uf_ind_proporcoes_soma
+      tipo: consistencia
+      descricao: Soma das proporções por nível (0–8) deve aproximar 100% quando aplicável
+  status_implementacao: documentado
+
+lineage:
+  upstream:
+    - basedosdados.br_inep_avaliacao_alfabetizacao.uf
+  downstream_planejado:
+    - silver.uf_indicadores
+
+contrato_dados:
+  frequencia_carga: nao_ingerido
+  anos_suportados: [2023, 2024]
+  sla_freshness: a_definir

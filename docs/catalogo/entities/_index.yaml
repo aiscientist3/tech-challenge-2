@@ -1,0 +1,64 @@
+# Índice de entidades do catálogo — camada Bronze
+
+version: "1.0"
+
+entidades:
+  - id: alunos
+    arquivo: entities/alunos.yaml
+    status: completo
+    camada: bronze
+    tipo: fato
+    particionado: true
+
+  - id: meta_brasil
+    arquivo: entities/meta_brasil.yaml
+    status: completo
+    camada: bronze
+    tipo: indicador
+    particionado: true
+
+  - id: meta_uf
+    arquivo: entities/meta_uf.yaml
+    status: completo
+    camada: bronze
+    tipo: indicador
+    particionado: true
+
+  - id: meta_municipio
+    arquivo: entities/meta_municipio.yaml
+    status: completo
+    camada: bronze
+    tipo: indicador
+    particionado: true
+
+  - id: uf
+    arquivo: entities/uf.yaml
+    status: completo
+    camada: bronze
+    tipo: referencia
+    particionado: false
+    observacao: br_bd_diretorios_brasil.uf — referência territorial
+
+  - id: municipio
+    arquivo: entities/municipio.yaml
+    status: completo
+    camada: bronze
+    tipo: referencia
+    particionado: false
+    observacao: br_bd_diretorios_brasil.municipio — referência territorial
+
+  - id: municipio_indicadores
+    arquivo: entities/municipio_indicadores.yaml
+    status: completo
+    camada: nao_ingerido
+    tipo: indicador
+    particionado: true
+    observacao: br_inep_avaliacao_alfabetizacao.municipio — fora do pipeline atual
+
+  - id: uf_indicadores
+    arquivo: entities/uf_indicadores.yaml
+    status: completo
+    camada: nao_ingerido
+    tipo: indicador
+    particionado: true
+    observacao: br_inep_avaliacao_alfabetizacao.uf — fora do pipeline atual

@@ -1,0 +1,136 @@
+# Catálogo de dados — entidade: uf
+# Camada Bronze | Referência territorial de Unidades da Federação (IBGE)
+# Nota: distinta de br_inep_avaliacao_alfabetizacao.uf (indicadores — ver uf_indicadores)
+
+version: "1.0"
+status: completo
+
+entity:
+  id: uf
+  nome: Unidades Federativas
+  nome_tecnico: uf
+  descricao: >
+    Diretório de referência das 27 unidades da federação (UF), com identificador
+    IBGE, sigla, nome e região. Utilizado para enriquecimento territorial das
+    entidades INEP na camada Silver.
+  dominio_negocio: Metas INEP
+  tipo: referencia
+  granularidade: "1 linha por UF"
+  periodicidade: esporadica
+  contem_dado_pessoal: false
+  classificacao: Publica
+  observacao: >
+    Fonte br_bd_diretorios_brasil.uf (Base dos Dados). Não confundir com
+    br_inep_avaliacao_alfabetizacao.uf, catalogada como uf_indicadores.
+
+governanca:
+  data_owner:
+    nome: AI Scientist
+    email: aiscientist3@gmail.com
+  data_stewards:
+    - Samuel Porto
+    - Walter Ferreira
+    - Amanda Rarymi
+
+origem:
+  provedor: Base dos Dados
+  sistema: Google BigQuery
+  dataset: br_bd_diretorios_brasil
+  tabela: uf
+  tabela_completa: basedosdados.br_bd_diretorios_brasil.uf
+  documentacao:
+    - https://basedosdados.org/dataset/br-bd-diretorios-brasil-uf
+
+destino:
+  camada: bronze
+  formato: delta_lake
+  particionamento: null
+  caminho_relativo: bronze/br_inep_alfabetizacao/uf/
+  caminho_exemplo: s3://{bucket}/bronze/br_inep_alfabetizacao/uf/
+
+ingestao:
+  pipeline: ingestion/batch/main.py
+  source_code: ingestion/batch/sources/uf.py
+  filtro_ano: false
+  modo_escrita: overwrite
+  colunas_origem: SELECT *
+
+chaves:
+  candidata_negocio:
+    - id_uf
+    - sigla
+
+colunas:
+  - nome: id_uf
+    tipo: STRING
+    nullable: true
+    descricao: ID Unidade da Federação - IBGE
+    chave: true
+    pii: false
+
+  - nome: sigla
+    tipo: STRING
+    nullable: true
+    descricao: Sigla da Unidade da Federação
+    chave: true
+    pii: false
+
+  - nome: nome
+    tipo: STRING
+    nullable: true
+    descricao: Unidade da Federação
+    chave: false
+    pii: false
+
+  - nome: regiao
+    tipo: STRING
+    nullable: true
+    descricao: Região
+    chave: false
+    pii: false
+
+colunas_tecnicas_ingestao:
+  - nome: _ingestion_timestamp
+    tipo: STRING
+    descricao: Data/hora UTC da ingestão (ISO 8601)
+    origem: pipeline
+  - nome: _source_table
+    tipo: STRING
+    descricao: Tabela de origem no BigQuery
+    origem: pipeline
+  - nome: _batch_id
+    tipo: STRING
+    descricao: UUID único do lote de ingestão
+    origem: pipeline
+
+qualidade:
+  regras:
+    - id: uf_sigla_obrigatoria
+      tipo: completude
+      coluna: sigla
+      descricao: Coluna sigla não deve ser nula
+    - id: uf_nome_obrigatorio
+      tipo: completude
+      coluna: nome
+      descricao: Coluna nome não deve ser nula
+    - id: uf_sigla_unica
+      tipo: unicidade
+      coluna: sigla
+      descricao: Sigla da UF única por carga
+    - id: uf_id_unico
+      tipo: unicidade
+      coluna: id_uf
+      descricao: ID IBGE da UF único por carga
+  status_implementacao: documentado
+
+lineage:
+  upstream:
+    - basedosdados.br_bd_diretorios_brasil.uf
+  downstream_planejado:
+    - silver.uf
+    - silver.meta_uf
+    - silver.alunos
+
+contrato_dados:
+  frequencia_carga: conforme agendamento Databricks Job
+  sla_freshness: a_definir

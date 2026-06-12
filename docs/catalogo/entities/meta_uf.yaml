@@ -1,0 +1,202 @@
+# Catálogo de dados — entidade: meta_uf
+# Camada Bronze | Metas e indicadores estaduais de alfabetização
+
+version: "1.0"
+status: completo
+
+entity:
+  id: meta_uf
+  nome: Meta Alfabetização — UF
+  nome_tecnico: meta_alfabetizacao_uf
+  descricao: >
+    Indicadores e metas de alfabetização em nível estadual (UF), segmentados por
+    rede de ensino. Inclui taxa observada na avaliação, metas anuais de 2024
+    a 2030 e percentual de participação no estado.
+  dominio_negocio: Metas INEP
+  tipo: indicador
+  granularidade: "1 linha por ano, UF e rede de ensino"
+  periodicidade: anual
+  contem_dado_pessoal: false
+  classificacao: Publica
+
+governanca:
+  data_owner:
+    nome: AI Scientist
+    email: aiscientist3@gmail.com
+  data_stewards:
+    - Samuel Porto
+    - Walter Ferreira
+    - Amanda Rarymi
+
+origem:
+  provedor: Base dos Dados
+  sistema: Google BigQuery
+  dataset: br_inep_avaliacao_alfabetizacao
+  tabela: meta_alfabetizacao_uf
+  tabela_completa: basedosdados.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_uf
+  documentacao:
+    - https://basedosdados.org/dataset/073a39d4-89cf-4068-b1e8-34ed0d9c0b72
+    - https://www.gov.br/inep/pt-br/areas-de-atuacao/pesquisas-e-avaliacao/avaliacao-da-alfabetizacao
+
+destino:
+  camada: bronze
+  formato: delta_lake
+  particionamento:
+    coluna: ano
+    tipo: hive_style
+  caminho_relativo: bronze/br_inep_alfabetizacao/meta_uf/
+  caminho_exemplo: s3://{bucket}/bronze/br_inep_alfabetizacao/meta_uf/ano=2024/
+
+ingestao:
+  pipeline: ingestion/batch/main.py
+  source_code: ingestion/batch/sources/meta_uf.py
+  filtro_ano: true
+  modo_escrita: overwrite
+  colunas_origem: SELECT *
+
+chaves:
+  candidata_negocio:
+    - ano
+    - sigla_uf
+    - rede
+  estrangeiras_sugeridas:
+    - coluna: sigla_uf
+      referencia: uf.sigla
+      descricao: Vínculo com diretório territorial de UFs
+
+colunas:
+  - nome: ano
+    tipo: INTEGER
+    nullable: true
+    descricao: Ano da avaliação
+    chave: true
+    pii: false
+
+  - nome: sigla_uf
+    tipo: STRING
+    nullable: true
+    descricao: Sigla da unidade da federação
+    chave: true
+    pii: false
+
+  - nome: rede
+    tipo: STRING
+    nullable: true
+    descricao: Rede de ensino
+    chave: true
+    pii: false
+
+  - nome: taxa_alfabetizacao
+    tipo: FLOAT
+    nullable: true
+    descricao: >
+      Percentual dos alunos avaliados no estado considerados alfabetizados,
+      mediante o resultado da avaliação estadual
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: meta_alfabetizacao_2024
+    tipo: FLOAT
+    nullable: true
+    descricao: Meta de alfabetização no ano de 2024
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: meta_alfabetizacao_2025
+    tipo: FLOAT
+    nullable: true
+    descricao: Meta de alfabetização no ano de 2025
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: meta_alfabetizacao_2026
+    tipo: FLOAT
+    nullable: true
+    descricao: Meta de alfabetização no ano de 2026
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: meta_alfabetizacao_2027
+    tipo: FLOAT
+    nullable: true
+    descricao: Meta de alfabetização no ano de 2027
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: meta_alfabetizacao_2028
+    tipo: FLOAT
+    nullable: true
+    descricao: Meta de alfabetização no ano de 2028
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: meta_alfabetizacao_2029
+    tipo: FLOAT
+    nullable: true
+    descricao: Meta de alfabetização no ano de 2029
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: meta_alfabetizacao_2030
+    tipo: FLOAT
+    nullable: true
+    descricao: Meta de alfabetização no ano de 2030
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: percentual_participacao
+    tipo: FLOAT
+    nullable: true
+    descricao: Percentual de participação no estado
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+colunas_tecnicas_ingestao:
+  - nome: _ingestion_timestamp
+    tipo: STRING
+    descricao: Data/hora UTC da ingestão (ISO 8601)
+    origem: pipeline
+  - nome: _source_table
+    tipo: STRING
+    descricao: Tabela de origem no BigQuery
+    origem: pipeline
+  - nome: _batch_id
+    tipo: STRING
+    descricao: UUID único do lote de ingestão
+    origem: pipeline
+
+qualidade:
+  regras:
+    - id: meta_uf_ano_obrigatorio
+      tipo: completude
+      coluna: ano
+      descricao: Coluna ano não deve ser nula
+    - id: meta_uf_chave_unica
+      tipo: unicidade
+      colunas: [ano, sigla_uf, rede]
+      descricao: Combinação ano + UF + rede deve ser única por carga
+    - id: meta_uf_taxas_faixa
+      tipo: dominio
+      descricao: Taxa de alfabetização, metas e percentual de participação entre 0 e 100
+  status_implementacao: documentado
+
+lineage:
+  upstream:
+    - basedosdados.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_uf
+  downstream_planejado:
+    - silver.meta_uf
+    - gold.indicador_crianca_alfabetizada
+
+contrato_dados:
+  frequencia_carga: conforme agendamento Databricks Job
+  anos_suportados: [2023, 2024]
+  sla_freshness: a_definir

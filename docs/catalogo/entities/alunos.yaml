@@ -1,0 +1,200 @@
+# Catálogo de dados — entidade: alunos
+# Camada Bronze | Microdados da Avaliação da Alfabetização
+
+version: "1.0"
+status: completo
+
+entity:
+  id: alunos
+  nome: Microdados de Alunos
+  nome_tecnico: alunos
+  descricao: >
+    Microdados em nível de aluno da Avaliação da Alfabetização (língua portuguesa),
+    incluindo indicador de alfabetização, proficiência equalizada ao SAEB e pesos
+    amostrais. Granularidade: um registro por aluno por ano de aplicação.
+  dominio_negocio: Metas INEP
+  tipo: fato
+  granularidade: "1 linha por aluno por ano"
+  periodicidade: anual
+  contem_dado_pessoal: false
+  classificacao: Publica
+  observacao_lgpd: >
+    Campos id_aluno e id_escola utilizam códigos mascarados/fictícios conforme
+    documentação INEP/Base dos Dados. Não há nome, CPF ou identificadores diretos.
+
+governanca:
+  data_owner:
+    nome: AI Scientist
+    email: aiscientist3@gmail.com
+  data_stewards:
+    - Samuel Porto
+    - Walter Ferreira
+    - Amanda Rarymi
+
+origem:
+  provedor: Base dos Dados
+  sistema: Google BigQuery
+  dataset: br_inep_avaliacao_alfabetizacao
+  tabela: alunos
+  tabela_completa: basedosdados.br_inep_avaliacao_alfabetizacao.alunos
+  documentacao:
+    - https://basedosdados.org/dataset/073a39d4-89cf-4068-b1e8-34ed0d9c0b72
+    - https://www.gov.br/inep/pt-br/areas-de-atuacao/pesquisas-e-avaliacao/avaliacao-da-alfabetizacao
+
+destino:
+  camada: bronze
+  formato: delta_lake
+  particionamento:
+    coluna: ano
+    tipo: hive_style
+  caminho_relativo: bronze/br_inep_alfabetizacao/alunos/
+  caminho_exemplo: s3://{bucket}/bronze/br_inep_alfabetizacao/alunos/ano=2024/
+
+ingestao:
+  pipeline: ingestion/batch/main.py
+  source_code: ingestion/batch/sources/alunos.py
+  filtro_ano: true
+  modo_escrita: overwrite
+  colunas_origem: SELECT *
+
+chaves:
+  candidata_negocio:
+    - ano
+    - id_aluno
+  estrangeiras_sugeridas:
+    - coluna: id_municipio
+      referencia: municipio.id_municipio
+      descricao: Vínculo territorial do aluno
+
+colunas:
+  - nome: ano
+    tipo: INTEGER
+    nullable: true
+    descricao: Ano de aplicação da avaliação estadual
+    chave: true
+    pii: false
+
+  - nome: id_municipio
+    tipo: STRING
+    nullable: true
+    descricao: ID Município de 7 dígitos
+    chave: false
+    pii: false
+
+  - nome: id_escola
+    tipo: STRING
+    nullable: true
+    descricao: Máscara do código da escola (códigos fictícios)
+    chave: false
+    pii: false
+
+  - nome: id_aluno
+    tipo: STRING
+    nullable: true
+    descricao: Código do aluno
+    chave: true
+    pii: false
+
+  - nome: caderno
+    tipo: STRING
+    nullable: true
+    descricao: Código do caderno atribuído ao aluno na prova de língua portuguesa
+    chave: false
+    pii: false
+
+  - nome: serie
+    tipo: STRING
+    nullable: true
+    descricao: Ano escolar
+    chave: false
+    pii: false
+
+  - nome: rede
+    tipo: STRING
+    nullable: true
+    descricao: Dependência administrativa da escola
+    chave: false
+    pii: false
+
+  - nome: presenca
+    tipo: STRING
+    nullable: true
+    descricao: Indicador de presença na prova de língua portuguesa
+    chave: false
+    pii: false
+
+  - nome: preenchimento_caderno
+    tipo: STRING
+    nullable: true
+    descricao: Indicador de preenchimento da prova de língua portuguesa
+    chave: false
+    pii: false
+
+  - nome: alfabetizado
+    tipo: STRING
+    nullable: true
+    descricao: >
+      Indica se o aluno, mediante o resultado da avaliação estadual,
+      é considerado alfabetizado
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: proficiencia
+    tipo: FLOAT
+    nullable: true
+    descricao: >
+      Proficiência do aluno em língua portuguesa calculada na escala equalizada
+      com o SAEB
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+  - nome: peso_aluno
+    tipo: FLOAT
+    nullable: true
+    descricao: Peso do aluno na prova de língua portuguesa
+    chave: false
+    pii: false
+
+colunas_tecnicas_ingestao:
+  - nome: _ingestion_timestamp
+    tipo: STRING
+    descricao: Data/hora UTC da ingestão (ISO 8601)
+    origem: pipeline
+  - nome: _source_table
+    tipo: STRING
+    descricao: Tabela de origem no BigQuery
+    origem: pipeline
+  - nome: _batch_id
+    tipo: STRING
+    descricao: UUID único do lote de ingestão
+    origem: pipeline
+
+qualidade:
+  regras:
+    - id: alunos_ano_obrigatorio
+      tipo: completude
+      coluna: ano
+      descricao: Coluna ano não deve ser nula
+    - id: alunos_chave_unica
+      tipo: unicidade
+      colunas: [ano, id_aluno]
+      descricao: Combinação ano + id_aluno deve ser única por carga
+    - id: alunos_id_municipio_formato
+      tipo: dominio
+      coluna: id_municipio
+      descricao: ID município com 7 dígitos numéricos
+  status_implementacao: documentado  # testes automatizados pendentes (Silver)
+
+lineage:
+  upstream:
+    - basedosdados.br_inep_avaliacao_alfabetizacao.alunos
+  downstream_planejado:
+    - silver.alunos
+    - gold.indicador_crianca_alfabetizada
+
+contrato_dados:
+  frequencia_carga: conforme agendamento Databricks Job
+  anos_suportados: [2023, 2024]
+  sla_freshness: a_definir
