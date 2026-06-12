@@ -66,7 +66,19 @@ output "secrets_sync_commands" {
     databricks secrets put --scope aws --key s3-bucket --string-value "${module.s3_datalake.bucket_name}"
     databricks secrets put --scope aws --key access-key-id --string-value "<run: terraform output -raw access_key_id>"
     databricks secrets put --scope aws --key secret-access-key --string-value "<run: terraform output -raw secret_access_key>"
+    databricks secrets put --scope aws --key kafka-bootstrap-servers --string-value "<EC2_KAFKA_IP>:9092"
+    databricks secrets put --scope aws --key kafka-topic --string-value "br-inep-alfabetizacao.alunos.performance"
   EOT
+}
+
+output "databricks_streaming_job_id" {
+  description = "ID of the Bronze streaming ingestion Databricks job."
+  value       = var.enable_streaming_job ? module.databricks_job_streaming[0].job_id : null
+}
+
+output "databricks_streaming_job_url" {
+  description = "URL of the Bronze streaming ingestion Databricks job."
+  value       = var.enable_streaming_job ? module.databricks_job_streaming[0].job_url : null
 }
 
 output "monitoring_sns_topic_arn" {

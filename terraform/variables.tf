@@ -198,3 +198,57 @@ variable "enable_s3_error_alarm" {
   type        = bool
   default     = true
 }
+
+# ---------------------------------------------------------------------------
+# Streaming ingestion job (Kafka → Bronze Delta)
+# ---------------------------------------------------------------------------
+
+variable "enable_streaming_job" {
+  description = "Provision a Databricks job for Kafka streaming ingestion."
+  type        = bool
+  default     = true
+}
+
+variable "streaming_job_name" {
+  description = "Name of the Databricks streaming ingestion job."
+  type        = string
+  default     = "bronze-streaming-ingestion"
+}
+
+variable "streaming_job_python_file" {
+  description = "Relative path to the streaming consumer entry point."
+  type        = string
+  default     = "ingestion/streaming/kafka/main.py"
+}
+
+variable "streaming_job_parameters" {
+  description = "CLI parameters passed to ingestion/streaming/kafka/main.py."
+  type        = list(string)
+  default     = ["--starting-offsets", "earliest"]
+}
+
+variable "streaming_job_timeout_seconds" {
+  description = "Maximum runtime for the streaming Databricks job task."
+  type        = number
+  default     = 1800
+}
+
+variable "streaming_job_pypi_dependencies" {
+  description = "PyPI packages for the streaming consumer (Spark + Delta)."
+  type        = list(string)
+  default = [
+    "delta-spark>=3.2.0",
+  ]
+}
+
+variable "enable_streaming_job_schedule" {
+  description = "Whether to enable a cron schedule for the streaming job."
+  type        = bool
+  default     = true
+}
+
+variable "streaming_job_schedule_cron" {
+  description = "Quartz cron for streaming job (e.g. every 5 minutes)."
+  type        = string
+  default     = "0 */5 * * * ?"
+}

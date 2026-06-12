@@ -2,6 +2,12 @@ variable "job_name" {
   type = string
 }
 
+variable "job_task_key" {
+  type        = string
+  default     = "bronze_ingestion"
+  description = "Databricks task key identifier."
+}
+
 variable "git_repo_url" {
   type = string
 }

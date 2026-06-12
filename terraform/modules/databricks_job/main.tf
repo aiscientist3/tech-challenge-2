@@ -37,7 +37,7 @@ resource "databricks_job" "bronze_batch" {
   }
 
   task {
-    task_key        = "bronze_batch_ingestion"
+    task_key        = var.job_task_key
     environment_key = local.environment_key
     timeout_seconds = var.job_timeout_seconds
 

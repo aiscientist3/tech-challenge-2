@@ -8,9 +8,11 @@ import pandas as pd
 import pytest
 
 from ingestion.batch.bronze_writer import BronzeWriter
-from ingestion.batch.config import SOURCE_CONFIGS, bronze_s3_path
+from ingestion.batch.config import build_source_configs
 from ingestion.batch.main import _parse_sources, _parse_years, build_run_config
 from ingestion.batch.sources import SOURCE_REGISTRY
+
+from .conftest import SOURCE_CONFIGS, TEST_BUCKET
 
 
 # ---------------------------------------------------------------------------
@@ -22,9 +24,13 @@ class TestConfig:
         assert set(SOURCE_CONFIGS.keys()) == set(SOURCE_REGISTRY.keys())
 
     def test_bronze_s3_path_format(self):
-        path = bronze_s3_path("meta_uf")
-        assert path.startswith("s3a://")
+        path = SOURCE_CONFIGS["meta_uf"].bronze_path
+        assert path.startswith("s3://")
         assert path.endswith("/meta_uf")
+
+    def test_build_source_configs_matches_registry(self):
+        configs = build_source_configs(TEST_BUCKET)
+        assert set(configs.keys()) == set(SOURCE_REGISTRY.keys())
 
     def test_reference_sources_skip_year_filter(self):
         assert SOURCE_CONFIGS["uf"].filter_by_year is False
@@ -71,16 +77,14 @@ class TestQueryBuilding:
         query = source_instances["meta_municipio"].build_query()
         assert "LIMIT 1000" in query
 
-    def test_uf_query_includes_key_columns(self, source_instances):
+    def test_uf_query_selects_all_columns(self, source_instances):
         query = source_instances["uf"].build_query()
-        assert "sigla_uf" in query
-        assert "nome" in query
+        assert "SELECT" in query.upper()
+        assert "*" in query
 
-    def test_municipio_query_includes_territorial_columns(self, source_instances):
+    def test_municipio_query_selects_from_correct_table(self, source_instances):
         query = source_instances["municipio"].build_query()
-        assert "id_municipio" in query
-        assert "sigla_uf" in query
-        assert "nome_regiao" in query
+        assert source_instances["municipio"].source_config.bq_table in query
 
 
 # ---------------------------------------------------------------------------
@@ -140,66 +144,48 @@ class TestArgumentParsing:
 
 class TestBronzeWriter:
     def test_validate_raises_on_missing_required_columns(self):
-        writer = BronzeWriter(spark=MagicMock())
+        writer = BronzeWriter(storage_options={})
         df = pd.DataFrame({"wrong_column": [1]})
         with pytest.raises(ValueError, match="missing required columns"):
             writer.validate(df, SOURCE_CONFIGS["uf"])
 
     def test_validate_passes_with_correct_columns(self):
-        writer = BronzeWriter(spark=MagicMock())
-        df = pd.DataFrame({"sigla_uf": ["SP"], "nome": ["São Paulo"]})
+        writer = BronzeWriter(storage_options={})
+        df = pd.DataFrame({"sigla": ["SP"], "nome": ["São Paulo"]})
         writer.validate(df, SOURCE_CONFIGS["uf"])
 
     def test_validate_empty_dataframe_does_not_raise(self):
-        writer = BronzeWriter(spark=MagicMock())
+        writer = BronzeWriter(storage_options={})
         writer.validate(pd.DataFrame(), SOURCE_CONFIGS["uf"])
 
     def test_write_returns_none_for_empty_dataframe(self):
-        writer = BronzeWriter(spark=MagicMock())
+        writer = BronzeWriter(storage_options={})
         result = writer.write(pd.DataFrame(), SOURCE_CONFIGS["uf"], batch_id="x")
         assert result is None
 
-    def test_write_attaches_metadata_columns(self):
-        mock_spark = MagicMock()
-        mock_sdf = MagicMock()
-        mock_spark.createDataFrame.return_value = mock_sdf
-        mock_sdf.withColumn.return_value = mock_sdf
-        mock_sdf.columns = ["ano", "sigla_uf"]
-        mock_sdf.count.return_value = 2
-
-        mock_write_chain = MagicMock()
-        mock_sdf.write.format.return_value = mock_write_chain
-        mock_write_chain.mode.return_value = mock_write_chain
-        mock_write_chain.option.return_value = mock_write_chain
-        mock_write_chain.partitionBy.return_value = mock_write_chain
-
-        writer = BronzeWriter(spark=mock_spark)
+    @patch("ingestion.batch.bronze_writer.write_deltalake")
+    def test_write_attaches_metadata_columns(self, mock_write):
+        writer = BronzeWriter(storage_options={"AWS_ACCESS_KEY_ID": "x"})
         df = pd.DataFrame({"ano": [2023], "sigla_uf": ["SP"]})
         destination = writer.write(df, SOURCE_CONFIGS["meta_uf"], batch_id="batch-xyz")
 
         assert destination == SOURCE_CONFIGS["meta_uf"].bronze_path
-        assert mock_sdf.withColumn.call_count == 3  # timestamp, table, batch_id
-        mock_write_chain.partitionBy.assert_called_once_with("ano")
-        mock_write_chain.save.assert_called_once_with(SOURCE_CONFIGS["meta_uf"].bronze_path)
+        mock_write.assert_called_once()
+        call_kwargs = mock_write.call_args.kwargs
+        written_df = call_kwargs["data"]
+        assert "_ingestion_timestamp" in written_df.columns
+        assert "_source_table" in written_df.columns
+        assert "_batch_id" in written_df.columns
+        assert call_kwargs["partition_by"] == ["ano"]
 
-    def test_write_skips_partition_for_reference_sources(self):
-        mock_spark = MagicMock()
-        mock_sdf = MagicMock()
-        mock_spark.createDataFrame.return_value = mock_sdf
-        mock_sdf.withColumn.return_value = mock_sdf
-        mock_sdf.columns = ["sigla_uf", "nome"]
-        mock_sdf.count.return_value = 27
-
-        mock_write_chain = MagicMock()
-        mock_sdf.write.format.return_value = mock_write_chain
-        mock_write_chain.mode.return_value = mock_write_chain
-        mock_write_chain.option.return_value = mock_write_chain
-
-        writer = BronzeWriter(spark=mock_spark)
-        df = pd.DataFrame({"sigla_uf": ["SP"], "nome": ["São Paulo"]})
+    @patch("ingestion.batch.bronze_writer.write_deltalake")
+    def test_write_skips_partition_for_reference_sources(self, mock_write):
+        writer = BronzeWriter(storage_options={"AWS_ACCESS_KEY_ID": "x"})
+        df = pd.DataFrame({"sigla": ["SP"], "nome": ["São Paulo"]})
         writer.write(df, SOURCE_CONFIGS["uf"], batch_id="b1")
 
-        mock_write_chain.partitionBy.assert_not_called()
+        call_kwargs = mock_write.call_args.kwargs
+        assert call_kwargs["partition_by"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -209,10 +195,10 @@ class TestBronzeWriter:
 class TestExtractRetry:
     def test_retries_once_on_transient_error(self, source_instances, mock_bq_client):
         source = source_instances["uf"]
-        success_df = pd.DataFrame({"sigla_uf": ["SP"], "nome": ["São Paulo"]})
+        success_df = pd.DataFrame({"sigla": ["SP"], "nome": ["São Paulo"]})
         mock_bq_client.query.side_effect = [
             RuntimeError("timeout"),
-            MagicMock(to_dataframe=lambda: success_df),
+            MagicMock(to_dataframe=lambda **_: success_df),
         ]
 
         with patch("ingestion.batch.sources.base_source.time.sleep"):
@@ -234,7 +220,7 @@ class TestExtractRetry:
     def test_no_retry_on_success(self, source_instances, mock_bq_client):
         source = source_instances["meta_brasil"]
         mock_bq_client.query.return_value = MagicMock(
-            to_dataframe=lambda: pd.DataFrame({"ano": [2023]})
+            to_dataframe=lambda **_: pd.DataFrame({"ano": [2023]})
         )
 
         with patch("ingestion.batch.sources.base_source.time.sleep") as mock_sleep:

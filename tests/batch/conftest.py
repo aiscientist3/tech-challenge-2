@@ -12,8 +12,11 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ingestion.batch.config import IngestionRunConfig, SOURCE_CONFIGS
+from ingestion.batch.config import IngestionRunConfig, build_source_configs
 from ingestion.batch.sources import SOURCE_REGISTRY
+
+TEST_BUCKET = "test-bucket"
+SOURCE_CONFIGS = build_source_configs(TEST_BUCKET)
 
 
 @pytest.fixture
