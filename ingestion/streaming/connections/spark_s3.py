@@ -35,6 +35,11 @@ def _get_dbutils() -> Any | None:
         return None
 
 
+def _is_databricks_runtime() -> bool:
+    """True when running inside a Databricks job or notebook."""
+    return os.getenv("DATABRICKS_RUNTIME_VERSION") is not None
+
+
 def _resolve_aws_credentials() -> tuple[str, str] | None:
     dbutils = _get_dbutils()
     if dbutils is not None:
@@ -69,13 +74,19 @@ def _resolve_aws_credentials() -> tuple[str, str] | None:
     return None
 
 
-def _configure_s3_credentials(
-    spark: SparkSession,
-    credentials: tuple[str, str] | None,
-) -> None:
-    if credentials is None:
-        return
+def _inject_aws_env_credentials(credentials: tuple[str, str]) -> None:
+    """Expose AWS keys to the Hadoop/S3 SDK via process environment variables."""
+    access_key, secret_key = credentials
+    os.environ["AWS_ACCESS_KEY_ID"] = access_key
+    os.environ["AWS_SECRET_ACCESS_KEY"] = secret_key
+    os.environ.setdefault("AWS_DEFAULT_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
 
+
+def _configure_s3_spark_conf(
+    spark: SparkSession,
+    credentials: tuple[str, str],
+) -> None:
+    """Inject S3A settings via Spark conf (local/dev only — blocked on Serverless Connect)."""
     access_key, secret_key = credentials
     spark.conf.set("spark.hadoop.fs.s3a.access.key", access_key)
     spark.conf.set("spark.hadoop.fs.s3a.secret.key", secret_key)
@@ -89,6 +100,17 @@ def _configure_s3_credentials(
     )
 
 
+def s3_path_for_spark(path: str) -> str:
+    """
+    Normalize S3 URIs for Spark Hadoop writes.
+
+    Spark Structured Streaming on Databricks expects the s3a:// scheme.
+    """
+    if path.startswith("s3://"):
+        return "s3a://" + path[len("s3://") :]
+    return path
+
+
 def get_or_create_spark_session(
     app_name: str = "tech-challenge-streaming-bronze",
 ) -> SparkSession:
@@ -96,10 +118,19 @@ def get_or_create_spark_session(
     credentials = _resolve_aws_credentials()
     aws_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 
+    if credentials is not None:
+        _inject_aws_env_credentials(credentials)
+
     active = SparkSession.getActiveSession()
     if active is not None:
         logger.info("Reusing active Databricks SparkSession.")
-        _configure_s3_credentials(active, credentials)
+        if credentials is not None and not _is_databricks_runtime():
+            _configure_s3_spark_conf(active, credentials)
+        elif credentials is not None:
+            logger.info(
+                "Databricks Serverless detected — AWS credentials set via environment "
+                "(spark.hadoop fs.s3a.* conf is not available on Spark Connect)."
+            )
         return active
 
     logger.info("No active session found — creating new SparkSession for local/dev.")

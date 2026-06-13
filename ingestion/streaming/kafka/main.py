@@ -28,7 +28,10 @@ from ingestion.streaming.connections.aws_credentials import (
     resolve_kafka_config,
     resolve_s3_bucket,
 )
-from ingestion.streaming.connections.spark_s3 import get_or_create_spark_session
+from ingestion.streaming.connections.spark_s3 import (
+    get_or_create_spark_session,
+    s3_path_for_spark,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -70,8 +73,12 @@ def main() -> None:
 
     bootstrap_servers, topic = resolve_kafka_config()
     bucket = resolve_s3_bucket()
-    bronze_path = bronze_table_path(bucket, args.stream_source, BRONZE_PREFIX)
-    ckpt_path = checkpoint_path(bucket, args.stream_source, CHECKPOINT_PREFIX)
+    bronze_path = s3_path_for_spark(
+        bronze_table_path(bucket, args.stream_source, BRONZE_PREFIX)
+    )
+    ckpt_path = s3_path_for_spark(
+        checkpoint_path(bucket, args.stream_source, CHECKPOINT_PREFIX)
+    )
 
     logger.info("=== STREAMING INGESTION STARTED (BRONZE) ===")
     logger.info("Kafka bootstrap : %s", bootstrap_servers)
