@@ -33,11 +33,23 @@ AWS_SECRET_SCOPE: str = os.getenv("AWS_SECRET_SCOPE", "aws")
 AWS_ACCESS_KEY_ID_SECRET: str = os.getenv("AWS_ACCESS_KEY_ID_SECRET", "access-key-id")
 AWS_SECRET_ACCESS_KEY_SECRET: str = os.getenv("AWS_SECRET_ACCESS_KEY_SECRET", "secret-access-key")
 AWS_S3_BUCKET_SECRET_KEY: str = os.getenv("AWS_S3_BUCKET_SECRET_KEY", "s3-bucket")
+KAFKA_BOOTSTRAP_SERVERS_SECRET: str = os.getenv(
+    "KAFKA_BOOTSTRAP_SERVERS_SECRET", "kafka-bootstrap-servers"
+)
+KAFKA_TOPIC_SECRET: str = os.getenv("KAFKA_TOPIC_SECRET", "kafka-topic")
 
 # ---------------------------------------------------------------------------
 # S3 path config (non-sensitive)
 # ---------------------------------------------------------------------------
 BRONZE_PREFIX: str = os.getenv("BRONZE_PREFIX", "bronze/br_inep_alfabetizacao")
+CHECKPOINT_PREFIX: str = os.getenv("CHECKPOINT_PREFIX", "_checkpoints/br_inep_alfabetizacao")
+
+# ---------------------------------------------------------------------------
+# Kafka (streaming producer / consumer)
+# ---------------------------------------------------------------------------
+DEFAULT_KAFKA_TOPIC: str = os.getenv(
+    "KAFKA_TOPIC", "br-inep-alfabetizacao.alunos.performance"
+)
 
 # ---------------------------------------------------------------------------
 # Runtime defaults

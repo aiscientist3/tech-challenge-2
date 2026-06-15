@@ -234,10 +234,13 @@ variable "streaming_job_timeout_seconds" {
 }
 
 variable "streaming_job_pypi_dependencies" {
-  description = "PyPI packages for the streaming consumer (Spark + Delta)."
+  description = "PyPI packages for the streaming consumer (Spark + deltalake S3 writes)."
   type        = list(string)
   default = [
-    "delta-spark>=3.2.0",
+    "numpy==1.26.4",
+    "pandas==2.2.3",
+    "deltalake>=0.18.0",
+    "boto3>=1.34.0",
   ]
 }
 

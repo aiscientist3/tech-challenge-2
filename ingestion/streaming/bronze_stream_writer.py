@@ -1,14 +1,19 @@
 """
 Bronze layer writer for Kafka streaming ingestion (Spark Structured Streaming).
+
+Reads from Kafka via Spark; writes Bronze Delta via deltalake (delta-rs) in
+foreachBatch — same Serverless-compatible approach as batch bronze_writer.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 
+from deltalake import write_deltalake
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import col, current_timestamp, from_json, lit
+from pyspark.sql.functions import col, from_json, lit
 from pyspark.sql.streaming import StreamingQuery
 
 from ingestion.streaming.config import ALUNOS_BQ_TABLE, DEFAULT_STREAM_SOURCE
@@ -58,8 +63,9 @@ def parse_kafka_envelope(kafka_df: DataFrame) -> DataFrame:
     )
 
 
-def expand_payload_to_bronze(envelope_df: DataFrame, spark: SparkSession) -> DataFrame:
-    """Expand JSON payload strings into columns and attach streaming metadata."""
+def expand_payload_to_bronze_records(envelope_df: DataFrame) -> list[dict]:
+    """Expand JSON payloads into row dicts with streaming metadata."""
+    ingestion_ts = datetime.now(timezone.utc).isoformat()
     records: list[dict] = []
     for row in envelope_df.collect():
         if not row.payload:
@@ -71,18 +77,12 @@ def expand_payload_to_bronze(envelope_df: DataFrame, spark: SparkSession) -> Dat
         record["_kafka_topic"] = row.topic
         record["_kafka_partition"] = row.partition
         record["_kafka_offset"] = row.offset
+        record["_ingestion_timestamp"] = ingestion_ts
+        record["_ingestion_mode"] = "stream"
+        record["_stream_sink"] = "kafka"
+        record["_source_table"] = ALUNOS_BQ_TABLE
         records.append(record)
-
-    if not records:
-        return envelope_df.limit(0)
-
-    return (
-        spark.createDataFrame(records)
-        .withColumn("_ingestion_timestamp", current_timestamp())
-        .withColumn("_ingestion_mode", lit("stream"))
-        .withColumn("_stream_sink", lit("kafka"))
-        .withColumn("_source_table", lit(ALUNOS_BQ_TABLE))
-    )
+    return records
 
 
 def write_stream_to_bronze(
@@ -91,6 +91,7 @@ def write_stream_to_bronze(
     *,
     bronze_path: str,
     checkpoint_path: str,
+    storage_options: dict[str, str],
     partition_by: str = "ano",
 ) -> StreamingQuery:
     """Run a micro-batch streaming job (Trigger.AvailableNow) to Bronze Delta."""
@@ -105,24 +106,32 @@ def write_stream_to_bronze(
             logger.info("Batch %d has no valid events — skipping.", batch_id)
             return
 
-        bronze_df = expand_payload_to_bronze(envelope_df, spark)
-        if bronze_df.isEmpty():
+        records = expand_payload_to_bronze_records(envelope_df)
+        if not records:
             logger.info("Batch %d produced no Bronze rows — skipping.", batch_id)
             return
 
-        writer = (
-            bronze_df.write.format("delta")
-            .mode("append")
-            .option("mergeSchema", "true")
-        )
-        if partition_by and partition_by in bronze_df.columns:
-            writer = writer.partitionBy(partition_by)
+        import pandas as pd
 
-        writer.save(bronze_path)
+        pdf = pd.DataFrame(records)
+        partition_cols = (
+            [partition_by]
+            if partition_by and partition_by in pdf.columns
+            else None
+        )
+
+        write_deltalake(
+            table_or_uri=bronze_path,
+            data=pdf,
+            mode="append",
+            partition_by=partition_cols,
+            storage_options=storage_options,
+            schema_mode="merge",
+        )
         logger.info(
             "Batch %d written to Bronze: %d records → %s",
             batch_id,
-            bronze_df.count(),
+            len(pdf),
             bronze_path,
         )
 
@@ -148,6 +157,7 @@ def run_kafka_to_bronze(
     topic: str,
     bronze_path: str,
     checkpoint_path: str,
+    storage_options: dict[str, str],
     starting_offsets: str = "earliest",
 ) -> None:
     """End-to-end helper: Kafka → parse → Bronze Delta (single micro-batch)."""
@@ -162,6 +172,7 @@ def run_kafka_to_bronze(
         kafka_df,
         bronze_path=bronze_path,
         checkpoint_path=checkpoint_path,
+        storage_options=storage_options,
     )
     query.awaitTermination()
     logger.info("Streaming ingestion to '%s' completed.", DEFAULT_STREAM_SOURCE)

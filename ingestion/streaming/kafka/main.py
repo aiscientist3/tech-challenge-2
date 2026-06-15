@@ -1,12 +1,8 @@
 """
 Kafka streaming consumer entry point — Bronze layer.
 
-Reads events from Kafka via Spark Structured Streaming and appends them to
-the Bronze Delta table using Trigger.AvailableNow() (Databricks Serverless).
-
-CLI usage:
-  python -m ingestion.streaming.kafka.main
-  python -m ingestion.streaming.kafka.main --starting-offsets latest
+Uses the same AWS/GCP connections as batch (Secret Scopes + deltalake on S3).
+Spark is only used to read from Kafka; Bronze writes match batch bronze_writer.
 """
 
 from __future__ import annotations
@@ -16,21 +12,20 @@ import logging
 import os
 import sys
 
-from ingestion.streaming.bronze_stream_writer import run_kafka_to_bronze
-from ingestion.streaming.config import (
-    BRONZE_PREFIX,
-    CHECKPOINT_PREFIX,
-    DEFAULT_STREAM_SOURCE,
-    bronze_table_path,
-    checkpoint_path,
-)
-from ingestion.streaming.connections.aws_credentials import (
+from pyspark.sql import SparkSession
+
+from ingestion.batch.config import BRONZE_PREFIX
+from ingestion.batch.connections.aws_credentials import (
+    resolve_aws_storage_options,
     resolve_kafka_config,
     resolve_s3_bucket,
 )
-from ingestion.streaming.connections.spark_s3 import (
-    get_or_create_spark_session,
-    s3_path_for_spark,
+from ingestion.batch.connections.spark_s3 import get_or_create_spark_session
+from ingestion.streaming.bronze_stream_writer import run_kafka_to_bronze
+from ingestion.streaming.config import (
+    DEFAULT_STREAM_SOURCE,
+    bronze_table_path,
+    checkpoint_path_for_runtime,
 )
 
 logging.basicConfig(
@@ -41,12 +36,10 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize_argv() -> None:
-    """Split Databricks job parameters passed as a single argv string."""
     if len(sys.argv) == 2 and sys.argv[1].startswith("--"):
         import shlex
 
-        extra = shlex.split(sys.argv[1])
-        sys.argv = [sys.argv[0]] + extra
+        sys.argv = [sys.argv[0]] + shlex.split(sys.argv[1])
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -57,27 +50,35 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--starting-offsets",
         default=os.getenv("KAFKA_STARTING_OFFSETS", "earliest"),
         choices=["earliest", "latest"],
-        help="Kafka starting offset strategy.",
     )
     parser.add_argument(
         "--stream-source",
         default=os.getenv("STREAM_SOURCE", DEFAULT_STREAM_SOURCE),
-        help="Bronze sub-path and checkpoint name for the stream.",
     )
     return parser
+
+
+def _get_spark_session() -> SparkSession:
+    """Reuse Databricks Serverless session (Kafka read only — no S3 via Spark)."""
+    active = SparkSession.getActiveSession()
+    if active is not None:
+        logger.info("Reusing active Databricks SparkSession.")
+        return active
+    return get_or_create_spark_session(app_name="tech-challenge-streaming-bronze")
 
 
 def main() -> None:
     _normalize_argv()
     args = _build_arg_parser().parse_args()
 
+    on_databricks = os.getenv("DATABRICKS_RUNTIME_VERSION") is not None
     bootstrap_servers, topic = resolve_kafka_config()
     bucket = resolve_s3_bucket()
-    bronze_path = s3_path_for_spark(
-        bronze_table_path(bucket, args.stream_source, BRONZE_PREFIX)
-    )
-    ckpt_path = s3_path_for_spark(
-        checkpoint_path(bucket, args.stream_source, CHECKPOINT_PREFIX)
+    storage_options = resolve_aws_storage_options()
+
+    bronze_path = bronze_table_path(bucket, args.stream_source, BRONZE_PREFIX)
+    ckpt_path = checkpoint_path_for_runtime(
+        bucket, args.stream_source, on_databricks=on_databricks
     )
 
     logger.info("=== STREAMING INGESTION STARTED (BRONZE) ===")
@@ -85,9 +86,8 @@ def main() -> None:
     logger.info("Kafka topic     : %s", topic)
     logger.info("Bronze path     : %s", bronze_path)
     logger.info("Checkpoint path : %s", ckpt_path)
-    logger.info("Starting offsets: %s", args.starting_offsets)
 
-    spark = get_or_create_spark_session(app_name="tech-challenge-streaming-bronze")
+    spark = _get_spark_session()
 
     run_kafka_to_bronze(
         spark,
@@ -95,6 +95,7 @@ def main() -> None:
         topic=topic,
         bronze_path=bronze_path,
         checkpoint_path=ckpt_path,
+        storage_options=storage_options,
         starting_offsets=args.starting_offsets,
     )
 

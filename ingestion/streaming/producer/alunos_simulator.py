@@ -20,15 +20,14 @@ from typing import Any
 from kafka import KafkaProducer
 from kafka.errors import NoBrokersAvailable
 
+from ingestion.batch.config import DEFAULT_KAFKA_TOPIC, DEFAULT_YEARS
+from ingestion.batch.connections.aws_credentials import resolve_kafka_config
+from ingestion.batch.connections.bigquery_client import create_bigquery_client
 from ingestion.streaming.config import (
     ALUNOS_BQ_TABLE,
-    DEFAULT_KAFKA_TOPIC,
-    DEFAULT_YEARS,
     PRODUCER_MAX_RETRIES,
     TEST_EVENT_LIMIT,
 )
-from ingestion.streaming.connections.aws_credentials import resolve_kafka_config
-from ingestion.streaming.connections.bigquery_client import create_bigquery_client
 from ingestion.streaming.event_schema import build_event_envelope, serialize_event
 
 logging.basicConfig(

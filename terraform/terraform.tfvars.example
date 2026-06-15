@@ -37,3 +37,19 @@ alert_email       = "you@example.com"
 tags = {
   Team = "tech-challenge-2"
 }
+
+# ---------------------------------------------------------------------------
+# Streaming ingestion (Kafka → Bronze Delta)
+# ---------------------------------------------------------------------------
+enable_streaming_job          = true
+streaming_job_name            = "bronze-streaming-ingestion"
+streaming_job_python_file     = "ingestion/streaming/kafka/main.py"
+streaming_job_parameters      = ["--starting-offsets", "earliest"]
+
+# Manual test: false. Production polling: true + cron every 5 min.
+enable_streaming_job_schedule = false
+# enable_streaming_job_schedule = true
+# streaming_job_schedule_cron   = "0 */5 * * * ?"
+
+# Streaming job PyPI deps (if using terraform apply):
+# numpy==1.26.4, pandas==2.2.3, deltalake>=0.18.0, boto3>=1.34.0
