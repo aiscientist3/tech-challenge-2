@@ -22,6 +22,15 @@ EVENT_TYPE_PERFORMANCE: str = "performance_measurement"
 PRODUCER_MAX_RETRIES: int = int(os.getenv("PRODUCER_MAX_RETRIES", "3"))
 TEST_EVENT_LIMIT: int = int(os.getenv("TEST_EVENT_LIMIT", "5"))
 
+# Unity Catalog Volume base for Structured Streaming checkpoints on Databricks
+# Serverless (DBFS root disabled). Create once in SQL Editor:
+#   CREATE SCHEMA IF NOT EXISTS workspace.streaming;
+#   CREATE VOLUME IF NOT EXISTS workspace.streaming.streaming_checkpoints;
+STREAMING_CHECKPOINT_VOLUME: str = os.getenv(
+    "STREAMING_CHECKPOINT_VOLUME",
+    "/Volumes/workspace/streaming/streaming_checkpoints",
+)
+
 
 def bronze_table_path(bucket: str, source_name: str, bronze_prefix: str = BRONZE_PREFIX) -> str:
     """S3 URI for a Bronze Delta table (same layout as batch)."""
@@ -42,16 +51,15 @@ def checkpoint_path_for_runtime(
     stream_name: str,
     checkpoint_prefix: str = CHECKPOINT_PREFIX,
 ) -> str:
-    """Checkpoint path for Structured Streaming (not Bronze data).
+    """Checkpoint path for Structured Streaming.
 
-    Databricks Serverless: public DBFS root is disabled and Spark cannot use
-    IAM-user secrets for S3A checkpoints — default is driver-local disk.
-    Local dev: S3 under the same bucket as Bronze.
-    Override anytime with STREAMING_CHECKPOINT_PATH.
+    Databricks Serverless: Unity Catalog Volume (DBFS root and Spark S3A blocked).
+    Local dev: S3 under the datalake bucket.
+    Override with STREAMING_CHECKPOINT_PATH.
     """
     override = os.getenv("STREAMING_CHECKPOINT_PATH")
     if override:
         return override.rstrip("/")
     if os.getenv("DATABRICKS_RUNTIME_VERSION") is not None:
-        return f"/local_disk0/{checkpoint_prefix}/{stream_name}"
+        return f"{STREAMING_CHECKPOINT_VOLUME.rstrip('/')}/{stream_name}"
     return checkpoint_path(bucket, stream_name, checkpoint_prefix)

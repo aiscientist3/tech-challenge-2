@@ -1,8 +1,11 @@
 """
 Bronze layer writer for Kafka streaming ingestion (Spark Structured Streaming).
 
-Reads from Kafka via Spark; writes Bronze Delta via deltalake (delta-rs) in
-foreachBatch — same Serverless-compatible approach as batch bronze_writer.
+Reads from Kafka via Spark readStream; writes Bronze Delta via deltalake in
+foreachBatch — Serverless-compatible for S3 writes (same as batch bronze_writer).
+
+Checkpoint must live on a Unity Catalog Volume on Databricks Serverless (DBFS root
+and Spark S3A checkpoints are blocked). See streaming/config.py.
 """
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ from datetime import datetime, timezone
 
 from deltalake import write_deltalake
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import col, from_json, lit
+from pyspark.sql.functions import col, from_json
 from pyspark.sql.streaming import StreamingQuery
 
 from ingestion.streaming.config import ALUNOS_BQ_TABLE, DEFAULT_STREAM_SOURCE
@@ -94,7 +97,7 @@ def write_stream_to_bronze(
     storage_options: dict[str, str],
     partition_by: str = "ano",
 ) -> StreamingQuery:
-    """Run a micro-batch streaming job (Trigger.AvailableNow) to Bronze Delta."""
+    """Run Structured Streaming (Trigger.AvailableNow) to Bronze Delta."""
 
     def _process_batch(batch_df: DataFrame, batch_id: int) -> None:
         if batch_df.isEmpty():
@@ -160,7 +163,7 @@ def run_kafka_to_bronze(
     storage_options: dict[str, str],
     starting_offsets: str = "earliest",
 ) -> None:
-    """End-to-end helper: Kafka → parse → Bronze Delta (single micro-batch)."""
+    """End-to-end: Kafka Structured Streaming → parse → Bronze Delta."""
     kafka_df = read_kafka_stream(
         spark,
         bootstrap_servers=bootstrap_servers,
