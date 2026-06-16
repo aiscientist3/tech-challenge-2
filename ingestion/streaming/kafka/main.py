@@ -15,12 +15,12 @@ import sys
 from pyspark.sql import SparkSession
 
 from ingestion.batch.config import BRONZE_PREFIX
-from ingestion.batch.connections.aws_credentials import (
+from ingestion.streaming.batch_runtime import (
+    get_or_create_spark_session,
     resolve_aws_storage_options,
     resolve_kafka_config,
     resolve_s3_bucket,
 )
-from ingestion.batch.connections.spark_s3 import get_or_create_spark_session
 from ingestion.streaming.bronze_stream_writer import run_kafka_to_bronze
 from ingestion.streaming.config import (
     DEFAULT_STREAM_SOURCE,
