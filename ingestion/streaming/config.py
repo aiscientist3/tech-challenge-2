@@ -16,7 +16,7 @@ from ingestion.batch.config import (
 ALUNOS_BQ_TABLE: str = (
     f"{BIGQUERY_PUBLIC_DATASET}.br_inep_avaliacao_alfabetizacao.alunos"
 )
-DEFAULT_STREAM_SOURCE: str = "alunos_stream"
+DEFAULT_STREAM_SOURCE: str = "alunos"
 EVENT_TYPE_PERFORMANCE: str = "performance_measurement"
 
 PRODUCER_MAX_RETRIES: int = int(os.getenv("PRODUCER_MAX_RETRIES", "3"))
