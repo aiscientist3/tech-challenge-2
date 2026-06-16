@@ -1,6 +1,5 @@
 """Data sources for batch ingestion."""
 
-from ingestion.batch.sources.alunos import AlunosSource
 from ingestion.batch.sources.base_source import BaseSource
 from ingestion.batch.sources.meta_brasil import MetaBrasilSource
 from ingestion.batch.sources.meta_municipio import MetaMunicipioSource
@@ -14,7 +13,6 @@ SOURCE_REGISTRY: dict[str, type[BaseSource]] = {
     "meta_brasil": MetaBrasilSource,
     "meta_uf": MetaUfSource,
     "meta_municipio": MetaMunicipioSource,
-    "alunos": AlunosSource,
 }
 
 __all__ = [
@@ -25,5 +23,4 @@ __all__ = [
     "MetaBrasilSource",
     "MetaUfSource",
     "MetaMunicipioSource",
-    "AlunosSource",
 ]

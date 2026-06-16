@@ -69,7 +69,6 @@ ALL_SOURCE_NAMES: tuple[str, ...] = (
     "meta_brasil",
     "meta_uf",
     "meta_municipio",
-    "alunos",
 )
 
 
@@ -146,15 +145,6 @@ def build_source_configs(
             filter_by_year=True,
             required_columns=("ano",),
             description="Literacy target and indicator per municipality.",
-        ),
-        "alunos": SourceConfig(
-            name="alunos",
-            bq_table=f"{BIGQUERY_PUBLIC_DATASET}.br_inep_avaliacao_alfabetizacao.alunos",
-            bronze_path=path("alunos"),
-            partition_by="ano",
-            filter_by_year=True,
-            required_columns=("ano",),
-            description="Student microdata — Criança Alfabetizada indicator.",
         ),
     }
 

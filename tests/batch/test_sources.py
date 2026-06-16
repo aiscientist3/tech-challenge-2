@@ -39,14 +39,14 @@ class TestConfig:
     def test_indicator_sources_apply_year_filter(self):
         assert SOURCE_CONFIGS["meta_brasil"].filter_by_year is True
         assert SOURCE_CONFIGS["meta_uf"].filter_by_year is True
-        assert SOURCE_CONFIGS["alunos"].filter_by_year is True
+        assert SOURCE_CONFIGS["meta_municipio"].filter_by_year is True
 
     def test_reference_sources_have_no_year_partition(self):
         assert SOURCE_CONFIGS["uf"].partition_by is None
         assert SOURCE_CONFIGS["municipio"].partition_by is None
 
     def test_indicator_sources_are_partitioned_by_year(self):
-        for name in ("meta_brasil", "meta_uf", "meta_municipio", "alunos"):
+        for name in ("meta_brasil", "meta_uf", "meta_municipio"):
             assert SOURCE_CONFIGS[name].partition_by == "ano"
 
 
@@ -128,7 +128,7 @@ class TestArgumentParsing:
 
     def test_build_run_config_append_mode(self):
         args = MagicMock(
-            sources="alunos",
+            sources="meta_municipio",
             years="2024",
             batch_id=None,
             row_limit=None,
