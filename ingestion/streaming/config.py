@@ -44,11 +44,14 @@ def checkpoint_path_for_runtime(
 ) -> str:
     """Checkpoint path for Structured Streaming (not Bronze data).
 
-    Override with STREAMING_CHECKPOINT_PATH when needed (e.g. UC Volume or
-    /local_disk0/... on Serverless workspaces with public DBFS root disabled).
-    Default: S3 (same bucket as Bronze) on Databricks and local dev.
+    Databricks Serverless: public DBFS root is disabled and Spark cannot use
+    IAM-user secrets for S3A checkpoints — default is driver-local disk.
+    Local dev: S3 under the same bucket as Bronze.
+    Override anytime with STREAMING_CHECKPOINT_PATH.
     """
     override = os.getenv("STREAMING_CHECKPOINT_PATH")
     if override:
         return override.rstrip("/")
+    if os.getenv("DATABRICKS_RUNTIME_VERSION") is not None:
+        return f"/local_disk0/{checkpoint_prefix}/{stream_name}"
     return checkpoint_path(bucket, stream_name, checkpoint_prefix)

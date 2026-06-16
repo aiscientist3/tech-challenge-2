@@ -67,24 +67,6 @@ def _get_spark_session() -> SparkSession:
     return get_or_create_spark_session(app_name="tech-challenge-streaming-bronze")
 
 
-def _inject_aws_env_for_spark_checkpoint(storage_options: dict[str, str]) -> None:
-    """Expose AWS keys to the JVM so Spark can write streaming checkpoints to S3.
-
-    Uses the same keys as batch ``resolve_aws_storage_options()`` (Secret Scope
-    ``aws`` or env vars). Must run before SparkSession starts.
-    """
-    region = storage_options.get("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
-    env_map = {
-        "AWS_ACCESS_KEY_ID": storage_options.get("AWS_ACCESS_KEY_ID"),
-        "AWS_SECRET_ACCESS_KEY": storage_options.get("AWS_SECRET_ACCESS_KEY"),
-        "AWS_DEFAULT_REGION": region,
-        "AWS_REGION": region,
-    }
-    for key, value in env_map.items():
-        if value:
-            os.environ[key] = value
-
-
 def main() -> None:
     _normalize_argv()
     args = _build_arg_parser().parse_args()
@@ -101,9 +83,6 @@ def main() -> None:
     logger.info("Kafka topic     : %s", topic)
     logger.info("Bronze path     : %s", bronze_path)
     logger.info("Checkpoint path : %s", ckpt_path)
-
-    if ckpt_path.startswith("s3://"):
-        _inject_aws_env_for_spark_checkpoint(storage_options)
 
     spark = _get_spark_session()
 
