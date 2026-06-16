@@ -4,6 +4,7 @@ AWS credential and configuration resolution for use with the deltalake library.
 Credential resolution order:
 1. Databricks Secret Scope  (production — Serverless)
 2. AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars  (CI / local dev)
+3. Default AWS credential chain  (``aws configure`` / ~/.aws/credentials)
 
 Returns a storage_options dict consumed directly by deltalake.write_deltalake().
 """
@@ -121,8 +122,28 @@ def resolve_aws_storage_options() -> dict[str, str]:
             "AWS_REGION": aws_region,
         }
 
+    profile = os.getenv("AWS_PROFILE")
+    try:
+        import boto3
+
+        session = boto3.Session(profile_name=profile) if profile else boto3.Session()
+        credentials = session.get_credentials()
+        if credentials is not None:
+            frozen = credentials.get_frozen_credentials()
+            region = session.region_name or aws_region
+            source = f"AWS profile '{profile}'" if profile else "default AWS credential chain"
+            logger.info("AWS credentials loaded from %s.", source)
+            return {
+                "AWS_ACCESS_KEY_ID": frozen.access_key,
+                "AWS_SECRET_ACCESS_KEY": frozen.secret_key,
+                "AWS_REGION": region,
+            }
+    except Exception as exc:
+        logger.warning("Could not load AWS credentials from default chain: %s", exc)
+
     raise RuntimeError(
         "AWS credentials not found. Configure the Databricks Secret Scope "
-        f"('{AWS_SECRET_SCOPE}/{AWS_ACCESS_KEY_ID_SECRET}') or set "
-        "AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY environment variables."
+        f"('{AWS_SECRET_SCOPE}/{AWS_ACCESS_KEY_ID_SECRET}'), set "
+        "AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY environment variables, "
+        "or run `aws configure`."
     )
