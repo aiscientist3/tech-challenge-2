@@ -40,11 +40,15 @@ def checkpoint_path(
 def checkpoint_path_for_runtime(
     bucket: str,
     stream_name: str,
-    *,
-    on_databricks: bool,
     checkpoint_prefix: str = CHECKPOINT_PREFIX,
 ) -> str:
-    """DBFS checkpoint on Databricks Serverless; S3 otherwise."""
-    if on_databricks:
-        return f"dbfs:/{checkpoint_prefix}/{stream_name}"
+    """Checkpoint path for Structured Streaming (not Bronze data).
+
+    Override with STREAMING_CHECKPOINT_PATH when needed (e.g. UC Volume or
+    /local_disk0/... on Serverless workspaces with public DBFS root disabled).
+    Default: S3 (same bucket as Bronze) on Databricks and local dev.
+    """
+    override = os.getenv("STREAMING_CHECKPOINT_PATH")
+    if override:
+        return override.rstrip("/")
     return checkpoint_path(bucket, stream_name, checkpoint_prefix)
