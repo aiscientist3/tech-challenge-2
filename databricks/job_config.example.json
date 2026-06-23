@@ -1,0 +1,103 @@
+{
+  "_comment": "Referência para criar jobs manualmente no Databricks UI. Copie cada bloco ao criar um Job.",
+  "git": {
+    "repo_url": "https://github.com/aiscientist3/tech-challenge-2.git",
+    "branch": "main",
+    "provider": "gitHub"
+  },
+  "secrets_scope": {
+    "scope": "aws",
+    "keys": [
+      "s3-bucket",
+      "access-key-id",
+      "secret-access-key",
+      "kafka-bootstrap-servers",
+      "kafka-topic"
+    ]
+  },
+  "environment": {
+    "type": "Serverless",
+    "environment_version": "2"
+  },
+  "jobs": [
+    {
+      "name": "bronze_batch_ingestion",
+      "task_key": "bronze_batch_ingestion",
+      "python_file": "ingestion/batch/main.py",
+      "parameters": ["--sources", "all", "--years", "2023,2024"],
+      "timeout_seconds": 3600,
+      "schedule_cron": "0 0 6 * * ?",
+      "schedule_timezone": "America/Sao_Paulo",
+      "pypi_dependencies": [
+        "numpy==1.26.4",
+        "pyarrow==15.0.2",
+        "pandas==2.2.3",
+        "db-dtypes==1.3.1",
+        "google-auth>=2.29.0",
+        "google-cloud-bigquery>=3.25.0",
+        "basedosdados>=2.0.0",
+        "deltalake>=0.18.0",
+        "boto3>=1.34.0"
+      ],
+      "notes": "BigQuery → Bronze Delta no S3. Requer Secret Scope gcp com project-id e service-account-json."
+    },
+    {
+      "name": "bronze_streaming_ingestion",
+      "task_key": "bronze_streaming_ingestion",
+      "python_file": "ingestion/streaming/kafka/main.py",
+      "parameters": ["--starting-offsets", "earliest"],
+      "timeout_seconds": 1800,
+      "schedule_cron": "0 */5 * * * ?",
+      "schedule_timezone": "America/Sao_Paulo",
+      "pypi_dependencies": [
+        "numpy==1.26.4",
+        "pandas==2.2.3",
+        "deltalake>=0.18.0",
+        "boto3>=1.34.0"
+      ],
+      "notes": "Kafka → Bronze MERGE → Silver MERGE (alunos). Um único job; Silver streaming NÃO é job separado. Requer Volume UC para checkpoint: workspace.streaming.streaming_checkpoints."
+    },
+    {
+      "name": "silver_batch_ingestion",
+      "task_key": "silver_batch_ingestion",
+      "python_file": "ingestion/silver/main.py",
+      "parameters": ["--entities", "all", "--years", "2023,2024"],
+      "timeout_seconds": 3600,
+      "schedule_cron": "0 0 7 * * ?",
+      "schedule_timezone": "America/Sao_Paulo",
+      "pypi_dependencies": [
+        "numpy==1.26.4",
+        "pyarrow==15.0.2",
+        "pandas==2.2.3",
+        "deltalake>=0.18.0",
+        "boto3>=1.34.0"
+      ],
+      "notes": "Bronze → padronização + dedup + joins → Silver. Rodar após bronze_batch_ingestion."
+    },
+    {
+      "name": "gold_batch_indicators",
+      "task_key": "gold_batch_indicators",
+      "python_file": "ingestion/gold/main.py",
+      "parameters": ["--datasets", "all", "--years", "2023,2024"],
+      "timeout_seconds": 3600,
+      "schedule_cron": "0 0 8 * * ?",
+      "schedule_timezone": "America/Sao_Paulo",
+      "pypi_dependencies": [
+        "numpy==1.26.4",
+        "pyarrow==15.0.2",
+        "pandas==2.2.3",
+        "deltalake>=0.18.0",
+        "boto3>=1.34.0"
+      ],
+      "notes": "Silver → Indicador Criança Alfabetizada + gap analysis → Gold. Rodar após silver_batch_ingestion."
+    }
+  ],
+  "workflow_suggested_order": [
+    "bronze_batch_ingestion",
+    "silver_batch_ingestion",
+    "gold_batch_indicators"
+  ],
+  "workflow_streaming_parallel": [
+    "bronze_streaming_ingestion"
+  ]
+}

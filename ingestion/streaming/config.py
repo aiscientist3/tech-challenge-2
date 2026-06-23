@@ -11,6 +11,7 @@ from ingestion.batch.config import (
     DEFAULT_KAFKA_TOPIC,
     DEFAULT_YEARS,
 )
+from ingestion.silver.config import SILVER_PREFIX
 
 # Alunos Bronze is owned by streaming (removed from batch ingestion on main).
 ALUNOS_BQ_TABLE: str = (
@@ -21,6 +22,9 @@ ALUNOS_BRONZE_PARTITION_BY: str = "ano"
 ALUNOS_BRONZE_MERGE_KEYS: tuple[str, ...] = ("ano", "id_aluno")
 # Legacy batch loads may still have _batch_id; stream never writes it.
 ALUNOS_BRONZE_MERGE_PRESERVE_COLUMNS: tuple[str, ...] = ("_batch_id",)
+ALUNOS_SILVER_MERGE_KEYS: tuple[str, ...] = ("ano", "id_aluno")
+ALUNOS_SILVER_PARTITION_BY: str = "ano"
+ALUNOS_SILVER_MERGE_PRESERVE_COLUMNS: tuple[str, ...] = ()
 EVENT_TYPE_PERFORMANCE: str = "performance_measurement"
 
 PRODUCER_MAX_RETRIES: int = int(os.getenv("PRODUCER_MAX_RETRIES", "3"))
@@ -43,6 +47,16 @@ def bronze_table_path(bucket: str, source_name: str, bronze_prefix: str = BRONZE
 def alunos_bronze_path(bucket: str, bronze_prefix: str = BRONZE_PREFIX) -> str:
     """S3 URI for the alunos Bronze Delta table (streaming upsert target)."""
     return bronze_table_path(bucket, DEFAULT_STREAM_SOURCE, bronze_prefix)
+
+
+def silver_table_path(bucket: str, source_name: str, silver_prefix: str = SILVER_PREFIX) -> str:
+    """S3 URI for a Silver Delta table."""
+    return f"s3://{bucket}/{silver_prefix}/{source_name}"
+
+
+def alunos_silver_path(bucket: str, silver_prefix: str = SILVER_PREFIX) -> str:
+    """S3 URI for the alunos Silver Delta table (streaming upsert target)."""
+    return silver_table_path(bucket, DEFAULT_STREAM_SOURCE, silver_prefix)
 
 
 def checkpoint_path(

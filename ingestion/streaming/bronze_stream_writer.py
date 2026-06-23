@@ -1,8 +1,11 @@
 """
 Bronze layer writer for Kafka streaming ingestion (Spark Structured Streaming).
 
-Reads from Kafka via Spark readStream; upserts Bronze Delta via deltalake MERGE
-in foreachBatch — updates existing alunos by (ano, id_aluno) and inserts new ones.
+Medallion flow for alunos:
+  Kafka → Bronze Delta (MERGE) → Silver Delta (MERGE)
+
+Only Bronze consumes Kafka. Silver is derived from each Bronze micro-batch after
+persist (see ingestion.streaming.silver_stream_writer).
 
 Checkpoint must live on a Unity Catalog Volume on Databricks Serverless (DBFS root
 and Spark S3A checkpoints are blocked). See streaming/config.py.
@@ -234,11 +237,12 @@ def write_stream_to_bronze(
     bronze_path: str,
     checkpoint_path: str,
     storage_options: dict[str, str],
+    silver_path: str | None = None,
     source_table: str = ALUNOS_BQ_TABLE,
     partition_by: str = ALUNOS_BRONZE_PARTITION_BY,
     merge_keys: tuple[str, ...] = ALUNOS_BRONZE_MERGE_KEYS,
 ) -> StreamingQuery:
-    """Run Structured Streaming (Trigger.AvailableNow) to Bronze Delta."""
+    """Run Structured Streaming (Trigger.AvailableNow) to Bronze Delta (+ Silver)."""
 
     def _process_batch(batch_df: DataFrame, micro_batch_id: int) -> None:
         if batch_df.isEmpty():
@@ -279,6 +283,23 @@ def write_stream_to_bronze(
             merge_keys,
         )
 
+        if silver_path and merged_rows > 0:
+            from ingestion.streaming.silver_stream_writer import (
+                process_bronze_to_silver_microbatch,
+            )
+
+            process_bronze_to_silver_microbatch(
+                pdf,
+                silver_path=silver_path,
+                storage_options=storage_options,
+                ingestion_ts=ingestion_ts,
+            )
+            logger.info(
+                "Micro-batch %d propagated Bronze → Silver: %s",
+                micro_batch_id,
+                silver_path,
+            )
+
     query = (
         kafka_df.writeStream.foreachBatch(_process_batch)
         .option("checkpointLocation", checkpoint_path)
@@ -302,12 +323,13 @@ def run_kafka_to_bronze(
     bronze_path: str,
     checkpoint_path: str,
     storage_options: dict[str, str],
+    silver_path: str | None = None,
     starting_offsets: str = "earliest",
     source_table: str = ALUNOS_BQ_TABLE,
     partition_by: str = ALUNOS_BRONZE_PARTITION_BY,
     merge_keys: tuple[str, ...] = ALUNOS_BRONZE_MERGE_KEYS,
 ) -> None:
-    """End-to-end: Kafka Structured Streaming → parse → Bronze Delta upsert."""
+    """End-to-end: Kafka → Bronze Delta upsert (+ optional Silver from Bronze)."""
     kafka_df = read_kafka_stream(
         spark,
         bootstrap_servers=bootstrap_servers,
@@ -320,9 +342,14 @@ def run_kafka_to_bronze(
         bronze_path=bronze_path,
         checkpoint_path=checkpoint_path,
         storage_options=storage_options,
+        silver_path=silver_path,
         source_table=source_table,
         partition_by=partition_by,
         merge_keys=merge_keys,
     )
     query.awaitTermination()
-    logger.info("Streaming ingestion to '%s' completed.", DEFAULT_STREAM_SOURCE)
+    logger.info(
+        "Streaming ingestion to '%s' completed (Silver enabled=%s).",
+        DEFAULT_STREAM_SOURCE,
+        silver_path is not None,
+    )

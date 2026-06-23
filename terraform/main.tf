@@ -96,3 +96,61 @@ module "databricks_job_streaming" {
 
   depends_on = [module.iam_databricks]
 }
+
+module "databricks_job_silver" {
+  count  = var.enable_silver_job ? 1 : 0
+  source = "./modules/databricks_job"
+
+  job_name                     = var.silver_job_name
+  job_task_key                 = "silver_batch_ingestion"
+  git_repo_url                 = var.git_repo_url
+  git_branch                   = var.git_branch
+  git_provider                 = var.git_provider
+  job_python_file              = var.silver_job_python_file
+  job_parameters               = var.silver_job_parameters
+  job_timeout_seconds          = var.silver_job_timeout_seconds
+  job_pypi_dependencies        = var.silver_job_pypi_dependencies
+  job_environment_version      = var.job_environment_version
+  enable_job_schedule          = var.enable_silver_job_schedule
+  job_schedule_cron            = var.silver_job_schedule_cron
+  register_instance_profile    = false
+  instance_profile_arn         = module.iam_databricks.instance_profile_arn
+  alert_emails                 = var.enable_monitoring && var.alert_email != "" ? [var.alert_email] : []
+  alert_on_success             = var.alert_on_success
+  job_duration_warning_seconds = var.job_duration_warning_seconds
+
+  providers = {
+    databricks = databricks
+  }
+
+  depends_on = [module.iam_databricks]
+}
+
+module "databricks_job_gold" {
+  count  = var.enable_gold_job ? 1 : 0
+  source = "./modules/databricks_job"
+
+  job_name                     = var.gold_job_name
+  job_task_key                 = "gold_batch_indicators"
+  git_repo_url                 = var.git_repo_url
+  git_branch                   = var.git_branch
+  git_provider                 = var.git_provider
+  job_python_file              = var.gold_job_python_file
+  job_parameters               = var.gold_job_parameters
+  job_timeout_seconds          = var.gold_job_timeout_seconds
+  job_pypi_dependencies        = var.gold_job_pypi_dependencies
+  job_environment_version      = var.job_environment_version
+  enable_job_schedule          = var.enable_gold_job_schedule
+  job_schedule_cron            = var.gold_job_schedule_cron
+  register_instance_profile    = false
+  instance_profile_arn         = module.iam_databricks.instance_profile_arn
+  alert_emails                 = var.enable_monitoring && var.alert_email != "" ? [var.alert_email] : []
+  alert_on_success             = var.alert_on_success
+  job_duration_warning_seconds = var.job_duration_warning_seconds
+
+  providers = {
+    databricks = databricks
+  }
+
+  depends_on = [module.iam_databricks]
+}

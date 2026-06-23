@@ -255,3 +255,119 @@ variable "streaming_job_schedule_cron" {
   type        = string
   default     = "0 */5 * * * ?"
 }
+
+# ---------------------------------------------------------------------------
+# Silver batch job (Bronze → treated Silver)
+# ---------------------------------------------------------------------------
+
+variable "enable_silver_job" {
+  description = "Provision a Databricks job for Silver batch processing."
+  type        = bool
+  default     = true
+}
+
+variable "silver_job_name" {
+  description = "Name of the Databricks Silver batch job."
+  type        = string
+  default     = "silver_batch_ingestion"
+}
+
+variable "silver_job_python_file" {
+  description = "Relative path to the Silver batch entry point."
+  type        = string
+  default     = "ingestion/silver/main.py"
+}
+
+variable "silver_job_parameters" {
+  description = "CLI parameters passed to ingestion/silver/main.py."
+  type        = list(string)
+  default     = ["--entities", "all", "--years", "2023,2024"]
+}
+
+variable "silver_job_timeout_seconds" {
+  description = "Maximum runtime for the Silver Databricks job task."
+  type        = number
+  default     = 3600
+}
+
+variable "silver_job_pypi_dependencies" {
+  description = "PyPI packages for the Silver batch job."
+  type        = list(string)
+  default = [
+    "numpy==1.26.4",
+    "pyarrow==15.0.2",
+    "pandas==2.2.3",
+    "deltalake>=0.18.0",
+    "boto3>=1.34.0",
+  ]
+}
+
+variable "enable_silver_job_schedule" {
+  description = "Whether to enable a cron schedule for the Silver batch job."
+  type        = bool
+  default     = false
+}
+
+variable "silver_job_schedule_cron" {
+  description = "Quartz cron for Silver batch job."
+  type        = string
+  default     = "0 0 7 * * ?"
+}
+
+# ---------------------------------------------------------------------------
+# Gold batch job (Silver → analytical indicators)
+# ---------------------------------------------------------------------------
+
+variable "enable_gold_job" {
+  description = "Provision a Databricks job for Gold batch indicator generation."
+  type        = bool
+  default     = true
+}
+
+variable "gold_job_name" {
+  description = "Name of the Databricks Gold batch job."
+  type        = string
+  default     = "gold-batch-indicators"
+}
+
+variable "gold_job_python_file" {
+  description = "Relative path to the Gold batch entry point."
+  type        = string
+  default     = "ingestion/gold/main.py"
+}
+
+variable "gold_job_parameters" {
+  description = "CLI parameters passed to ingestion/gold/main.py."
+  type        = list(string)
+  default     = ["--datasets", "all", "--years", "2023,2024"]
+}
+
+variable "gold_job_timeout_seconds" {
+  description = "Maximum runtime for the Gold Databricks job task."
+  type        = number
+  default     = 3600
+}
+
+variable "gold_job_pypi_dependencies" {
+  description = "PyPI packages for the Gold batch job."
+  type        = list(string)
+  default = [
+    "numpy==1.26.4",
+    "pyarrow==15.0.2",
+    "pandas==2.2.3",
+    "deltalake>=0.18.0",
+    "boto3>=1.34.0",
+  ]
+}
+
+variable "enable_gold_job_schedule" {
+  description = "Whether to enable a cron schedule for the Gold batch job."
+  type        = bool
+  default     = false
+}
+
+variable "gold_job_schedule_cron" {
+  description = "Quartz cron for Gold batch job."
+  type        = string
+  default     = "0 0 7 * * ?"
+}
