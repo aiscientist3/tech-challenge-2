@@ -1,8 +1,10 @@
 """
-Kafka streaming consumer entry point — Bronze layer.
+Kafka streaming consumer entry point — Bronze + Silver (alunos).
 
-Uses the same AWS connections as batch (Secret Scopes + deltalake on S3).
-Spark reads Kafka; Bronze writes use Delta MERGE upsert on (ano, id_aluno).
+Medallion flow:
+  Kafka → Bronze Delta (MERGE) → Silver Delta (MERGE)
+
+Only this job consumes Kafka. Silver is derived from each Bronze micro-batch.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from ingestion.streaming.config import (
     ALUNOS_BQ_TABLE,
     ALUNOS_BRONZE_PARTITION_BY,
     DEFAULT_STREAM_SOURCE,
+    alunos_silver_path,
     bronze_table_path,
     checkpoint_path_for_runtime,
 )
@@ -46,7 +49,9 @@ def _normalize_argv() -> None:
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Streaming ingestion — Kafka → S3 Bronze Delta (availableNow)."
+        description=(
+            "Streaming ingestion — Kafka → Bronze Delta → Silver Delta (alunos, availableNow)."
+        )
     )
     parser.add_argument(
         "--starting-offsets",
@@ -78,12 +83,14 @@ def main() -> None:
     storage_options = resolve_aws_storage_options()
 
     bronze_path = bronze_table_path(bucket, args.stream_source, BRONZE_PREFIX)
+    silver_path = alunos_silver_path(bucket)
     ckpt_path = checkpoint_path_for_runtime(bucket, args.stream_source)
 
-    logger.info("=== STREAMING INGESTION STARTED (BRONZE) ===")
+    logger.info("=== STREAMING INGESTION STARTED (BRONZE → SILVER) ===")
     logger.info("Kafka bootstrap : %s", bootstrap_servers)
     logger.info("Kafka topic     : %s", topic)
     logger.info("Bronze path     : %s", bronze_path)
+    logger.info("Silver path     : %s", silver_path)
     logger.info("Checkpoint path : %s", ckpt_path)
 
     spark = _get_spark_session()
@@ -95,12 +102,13 @@ def main() -> None:
         bronze_path=bronze_path,
         checkpoint_path=ckpt_path,
         storage_options=storage_options,
+        silver_path=silver_path,
         starting_offsets=args.starting_offsets,
         source_table=ALUNOS_BQ_TABLE,
         partition_by=ALUNOS_BRONZE_PARTITION_BY,
     )
 
-    logger.info("=== STREAMING INGESTION COMPLETED ===")
+    logger.info("=== STREAMING INGESTION COMPLETED (BRONZE → SILVER) ===")
 
 
 if __name__ == "__main__":

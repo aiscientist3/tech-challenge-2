@@ -53,3 +53,25 @@ enable_streaming_job_schedule = false
 
 # Streaming job PyPI deps (if using terraform apply):
 # numpy==1.26.4, pandas==2.2.3, deltalake>=0.18.0, boto3>=1.34.0
+
+# ---------------------------------------------------------------------------
+# Silver batch (Bronze → treated Silver)
+# ---------------------------------------------------------------------------
+enable_silver_job        = true
+silver_job_name          = "silver_batch_ingestion"
+silver_job_python_file   = "ingestion/silver/main.py"
+silver_job_parameters    = ["--entities", "all", "--years", "2023,2024"]
+enable_silver_job_schedule = false
+# enable_silver_job_schedule = true
+# silver_job_schedule_cron   = "0 0 7 * * ?"
+
+# ---------------------------------------------------------------------------
+# Gold batch (Silver → analytical indicators)
+# ---------------------------------------------------------------------------
+enable_gold_job       = true
+gold_job_name         = "gold-batch-indicators"
+gold_job_python_file  = "ingestion/gold/main.py"
+gold_job_parameters   = ["--datasets", "all", "--years", "2023,2024"]
+enable_gold_job_schedule = false
+# enable_gold_job_schedule = true
+# gold_job_schedule_cron   = "0 0 7 * * ?"

@@ -81,6 +81,26 @@ output "databricks_streaming_job_url" {
   value       = var.enable_streaming_job ? module.databricks_job_streaming[0].job_url : null
 }
 
+output "databricks_silver_job_id" {
+  description = "ID of the Silver batch ingestion Databricks job."
+  value       = var.enable_silver_job ? module.databricks_job_silver[0].job_id : null
+}
+
+output "databricks_silver_job_url" {
+  description = "URL of the Silver batch ingestion Databricks job."
+  value       = var.enable_silver_job ? module.databricks_job_silver[0].job_url : null
+}
+
+output "databricks_gold_job_id" {
+  description = "ID of the Gold batch indicators Databricks job."
+  value       = var.enable_gold_job ? module.databricks_job_gold[0].job_id : null
+}
+
+output "databricks_gold_job_url" {
+  description = "URL of the Gold batch indicators Databricks job."
+  value       = var.enable_gold_job ? module.databricks_job_gold[0].job_url : null
+}
+
 output "monitoring_sns_topic_arn" {
   description = "SNS topic ARN for pipeline alerts (when monitoring is enabled)."
   value       = var.enable_monitoring ? module.monitoring[0].sns_topic_arn : null
