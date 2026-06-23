@@ -1,8 +1,8 @@
 """
 Kafka streaming consumer entry point — Bronze layer.
 
-Uses the same AWS/GCP connections as batch (Secret Scopes + deltalake on S3).
-Spark is only used to read from Kafka; Bronze writes match batch bronze_writer.
+Uses the same AWS connections as batch (Secret Scopes + deltalake on S3).
+Spark reads Kafka; Bronze writes use Delta MERGE upsert on (ano, id_aluno).
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from ingestion.streaming.batch_runtime import (
 )
 from ingestion.streaming.bronze_stream_writer import run_kafka_to_bronze
 from ingestion.streaming.config import (
+    ALUNOS_BQ_TABLE,
     DEFAULT_STREAM_SOURCE,
     bronze_table_path,
     checkpoint_path_for_runtime,
@@ -94,6 +95,7 @@ def main() -> None:
         checkpoint_path=ckpt_path,
         storage_options=storage_options,
         starting_offsets=args.starting_offsets,
+        source_table=ALUNOS_BQ_TABLE,
     )
 
     logger.info("=== STREAMING INGESTION COMPLETED ===")

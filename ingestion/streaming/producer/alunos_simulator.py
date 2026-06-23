@@ -23,11 +23,7 @@ from kafka.errors import NoBrokersAvailable
 from ingestion.batch.config import DEFAULT_KAFKA_TOPIC, DEFAULT_YEARS
 from ingestion.batch.connections.aws_credentials import resolve_kafka_config
 from ingestion.batch.connections.bigquery_client import create_bigquery_client
-from ingestion.streaming.config import (
-    ALUNOS_BQ_TABLE,
-    PRODUCER_MAX_RETRIES,
-    TEST_EVENT_LIMIT,
-)
+from ingestion.streaming.config import ALUNOS_BQ_TABLE, PRODUCER_MAX_RETRIES
 from ingestion.streaming.event_schema import build_event_envelope, serialize_event
 
 logging.basicConfig(
@@ -179,8 +175,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--row-limit",
         type=int,
-        default=TEST_EVENT_LIMIT,
-        help="Max events to publish (default: 5 for test runs).",
+        default=None,
+        help="Max events to publish (default: no limit).",
     )
     parser.add_argument(
         "--sleep-seconds",

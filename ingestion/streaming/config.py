@@ -10,17 +10,18 @@ from ingestion.batch.config import (
     CHECKPOINT_PREFIX,
     DEFAULT_KAFKA_TOPIC,
     DEFAULT_YEARS,
-    DEV_ROW_LIMIT,
 )
 
 ALUNOS_BQ_TABLE: str = (
     f"{BIGQUERY_PUBLIC_DATASET}.br_inep_avaliacao_alfabetizacao.alunos"
 )
-DEFAULT_STREAM_SOURCE: str = "alunos_stream"
+DEFAULT_STREAM_SOURCE: str = "alunos"
+ALUNOS_BRONZE_MERGE_KEYS: tuple[str, ...] = ("ano", "id_aluno")
+# Batch-only audit columns — preserved on MERGE update (stream does not set these).
+ALUNOS_BRONZE_MERGE_PRESERVE_COLUMNS: tuple[str, ...] = ("_batch_id",)
 EVENT_TYPE_PERFORMANCE: str = "performance_measurement"
 
 PRODUCER_MAX_RETRIES: int = int(os.getenv("PRODUCER_MAX_RETRIES", "3"))
-TEST_EVENT_LIMIT: int = int(os.getenv("TEST_EVENT_LIMIT", "5"))
 
 # Unity Catalog Volume base for Structured Streaming checkpoints on Databricks
 # Serverless (DBFS root disabled). Create once in SQL Editor:
