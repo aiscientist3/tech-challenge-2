@@ -24,6 +24,7 @@ from ingestion.streaming.batch_runtime import (
 from ingestion.streaming.bronze_stream_writer import run_kafka_to_bronze
 from ingestion.streaming.config import (
     ALUNOS_BQ_TABLE,
+    ALUNOS_BRONZE_PARTITION_BY,
     DEFAULT_STREAM_SOURCE,
     bronze_table_path,
     checkpoint_path_for_runtime,
@@ -96,6 +97,7 @@ def main() -> None:
         storage_options=storage_options,
         starting_offsets=args.starting_offsets,
         source_table=ALUNOS_BQ_TABLE,
+        partition_by=ALUNOS_BRONZE_PARTITION_BY,
     )
 
     logger.info("=== STREAMING INGESTION COMPLETED ===")

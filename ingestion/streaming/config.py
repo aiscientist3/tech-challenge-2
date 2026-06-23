@@ -1,4 +1,4 @@
-"""Streaming-only configuration (Kafka paths, producer limits)."""
+"""Streaming-only configuration (Kafka paths, producer limits, alunos Bronze)."""
 
 from __future__ import annotations
 
@@ -12,12 +12,14 @@ from ingestion.batch.config import (
     DEFAULT_YEARS,
 )
 
+# Alunos Bronze is owned by streaming (removed from batch ingestion on main).
 ALUNOS_BQ_TABLE: str = (
     f"{BIGQUERY_PUBLIC_DATASET}.br_inep_avaliacao_alfabetizacao.alunos"
 )
 DEFAULT_STREAM_SOURCE: str = "alunos"
+ALUNOS_BRONZE_PARTITION_BY: str = "ano"
 ALUNOS_BRONZE_MERGE_KEYS: tuple[str, ...] = ("ano", "id_aluno")
-# Batch-only audit columns — preserved on MERGE update (stream does not set these).
+# Legacy batch loads may still have _batch_id; stream never writes it.
 ALUNOS_BRONZE_MERGE_PRESERVE_COLUMNS: tuple[str, ...] = ("_batch_id",)
 EVENT_TYPE_PERFORMANCE: str = "performance_measurement"
 
@@ -36,6 +38,11 @@ STREAMING_CHECKPOINT_VOLUME: str = os.getenv(
 def bronze_table_path(bucket: str, source_name: str, bronze_prefix: str = BRONZE_PREFIX) -> str:
     """S3 URI for a Bronze Delta table (same layout as batch)."""
     return f"s3://{bucket}/{bronze_prefix}/{source_name}"
+
+
+def alunos_bronze_path(bucket: str, bronze_prefix: str = BRONZE_PREFIX) -> str:
+    """S3 URI for the alunos Bronze Delta table (streaming upsert target)."""
+    return bronze_table_path(bucket, DEFAULT_STREAM_SOURCE, bronze_prefix)
 
 
 def checkpoint_path(

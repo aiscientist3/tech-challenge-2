@@ -24,6 +24,7 @@ from ingestion.streaming.config import (
     ALUNOS_BQ_TABLE,
     ALUNOS_BRONZE_MERGE_KEYS,
     ALUNOS_BRONZE_MERGE_PRESERVE_COLUMNS,
+    ALUNOS_BRONZE_PARTITION_BY,
     DEFAULT_STREAM_SOURCE,
 )
 from ingestion.streaming.event_schema import KAFKA_EVENT_SCHEMA
@@ -82,7 +83,7 @@ def merge_upsert_to_bronze(
     storage_options: dict[str, str],
     merge_keys: tuple[str, ...] = ALUNOS_BRONZE_MERGE_KEYS,
     preserve_columns: tuple[str, ...] = ALUNOS_BRONZE_MERGE_PRESERVE_COLUMNS,
-    partition_by: str | None = "ano",
+    partition_by: str | None = ALUNOS_BRONZE_PARTITION_BY,
 ) -> int:
     """
     Upsert rows into Bronze Delta: update matched alunos, insert new ones.
@@ -234,7 +235,7 @@ def write_stream_to_bronze(
     checkpoint_path: str,
     storage_options: dict[str, str],
     source_table: str = ALUNOS_BQ_TABLE,
-    partition_by: str = "ano",
+    partition_by: str = ALUNOS_BRONZE_PARTITION_BY,
     merge_keys: tuple[str, ...] = ALUNOS_BRONZE_MERGE_KEYS,
 ) -> StreamingQuery:
     """Run Structured Streaming (Trigger.AvailableNow) to Bronze Delta."""
@@ -303,7 +304,7 @@ def run_kafka_to_bronze(
     storage_options: dict[str, str],
     starting_offsets: str = "earliest",
     source_table: str = ALUNOS_BQ_TABLE,
-    partition_by: str = "ano",
+    partition_by: str = ALUNOS_BRONZE_PARTITION_BY,
     merge_keys: tuple[str, ...] = ALUNOS_BRONZE_MERGE_KEYS,
 ) -> None:
     """End-to-end: Kafka Structured Streaming → parse → Bronze Delta upsert."""
