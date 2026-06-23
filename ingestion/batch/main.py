@@ -8,7 +8,7 @@ Supports two invocation styles:
 CLI usage:
   python -m ingestion.batch.main --sources all --years 2023,2024
   python -m ingestion.batch.main --sources uf,meta_brasil --years 2024 --row-limit 5000
-  python -m ingestion.batch.main --sources alunos --years 2024 --append
+  python -m ingestion.batch.main --sources meta_municipio --years 2024 --append
 """
 
 from __future__ import annotations
