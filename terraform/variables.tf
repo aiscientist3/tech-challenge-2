@@ -89,7 +89,7 @@ variable "git_provider" {
 variable "job_name" {
   description = "Name of the Databricks batch ingestion job."
   type        = string
-  default     = "bronze-batch-ingestion"
+  default     = "bronze_batch_ingestion"
 }
 
 variable "job_parameters" {
@@ -212,7 +212,7 @@ variable "enable_streaming_job" {
 variable "streaming_job_name" {
   description = "Name of the Databricks streaming ingestion job."
   type        = string
-  default     = "bronze-streaming-ingestion"
+  default     = "bronze_streaming_ingestion"
 }
 
 variable "streaming_job_python_file" {
@@ -327,7 +327,7 @@ variable "enable_gold_job" {
 variable "gold_job_name" {
   description = "Name of the Databricks Gold batch job."
   type        = string
-  default     = "gold-batch-indicators"
+  default     = "gold_batch_indicators"
 }
 
 variable "gold_job_python_file" {

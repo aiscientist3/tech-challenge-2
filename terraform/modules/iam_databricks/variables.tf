@@ -29,9 +29,9 @@ locals {
 
   cloudwatch_policy_statement = var.enable_cloudwatch_metrics ? [
     {
-      Sid    = "CloudWatchPutMetrics"
-      Effect = "Allow"
-      Action = ["cloudwatch:PutMetricData"]
+      Sid      = "CloudWatchPutMetrics"
+      Effect   = "Allow"
+      Action   = ["cloudwatch:PutMetricData"]
       Resource = "*"
     },
   ] : []
