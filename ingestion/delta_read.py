@@ -1,15 +1,19 @@
 """
-Shared Delta → pandas reader with Databricks Spark fallback.
+Shared Delta → pandas reader for Gold/Silver batch jobs.
 
-deltalake + pyarrow can fail on hive-partitioned tables in Databricks Serverless
-(``field() takes at least 2 positional arguments``). Spark Delta reads are native
-on Databricks and bypass that code path.
+Databricks Serverless notes:
+- Spark cannot inject s3a credentials (Spark Connect blocks spark.hadoop.fs.s3a.*).
+- deltalake ``to_pandas`` can fail on hive-partitioned tables (pyarrow ``field()`` bug).
+- Fallback: list active files via Delta Rust API (``file_uris``) and read parquet with boto3
+  using the same ``storage_options`` credentials that already work for writes.
 """
 
 from __future__ import annotations
 
+import io
 import logging
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 import pandas as pd
 from deltalake import DeltaTable
@@ -20,83 +24,86 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _read_via_spark(
-    path: str,
+def _parse_s3_uri(uri: str) -> tuple[str, str]:
+    parsed = urlparse(uri)
+    if parsed.scheme != "s3" or not parsed.netloc:
+        raise ValueError(f"Invalid S3 URI: {uri}")
+    key = parsed.path.lstrip("/")
+    return parsed.netloc, key
+
+
+def _build_s3_client(storage_options: dict[str, str]):
+    import boto3
+
+    return boto3.client(
+        "s3",
+        aws_access_key_id=storage_options.get("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=storage_options.get("AWS_SECRET_ACCESS_KEY"),
+        region_name=storage_options.get("AWS_REGION", "us-east-1"),
+    )
+
+
+def _read_parquet_objects(
+    s3_client,
+    bucket: str,
+    keys: list[str],
+) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    for key in keys:
+        if not key.endswith(".parquet") or "_delta_log" in key:
+            continue
+        body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
+        frames.append(pd.read_parquet(io.BytesIO(body)))
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def _uris_to_keys(uris: list[str]) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for uri in uris:
+        bucket, key = _parse_s3_uri(uri)
+        pairs.append((bucket, key))
+    return pairs
+
+
+def _read_via_file_uris(
+    table: DeltaTable,
+    storage_options: dict[str, str],
     *,
     years: list[int] | None,
     partition_col: str | None,
-) -> pd.DataFrame | None:
-    """Read a Delta table with Spark when a session is available (Databricks)."""
-    try:
-        from pyspark.sql import SparkSession
-        from pyspark.sql.functions import col
-    except ImportError:
-        return None
-
-    spark = SparkSession.getActiveSession()
-    if spark is None:
-        return None
-
-    try:
-        from ingestion.batch.connections.spark_s3 import (
-            _configure_s3_credentials,
-            _resolve_aws_credentials,
-        )
-
-        _configure_s3_credentials(spark, _resolve_aws_credentials())
-    except Exception as exc:
-        logger.warning("Could not configure Spark S3 credentials: %s", exc)
-
-    logger.info("Reading Delta via Spark: %s", path)
-    load_paths = [path]
-    if path.startswith("s3://"):
-        load_paths.append(path.replace("s3://", "s3a://", 1))
-
-    last_exc: Exception | None = None
-    for load_path in load_paths:
-        try:
-            spark_df = spark.read.format("delta").load(load_path)
-            if years and partition_col:
-                spark_df = spark_df.filter(col(partition_col).isin(years))
-            pdf = spark_df.toPandas()
-            logger.info(
-                "Spark Delta read complete: %s — %d records.",
-                load_path,
-                len(pdf),
-            )
-            return pdf
-        except Exception as exc:
-            last_exc = exc
-            logger.warning("Spark Delta read failed for %s: %s", load_path, exc)
-
-    logger.warning(
-        "Spark Delta read unavailable; falling back to deltalake. Last error: %s",
-        last_exc,
-    )
-    return None
-
-
-def _read_single_partition_deltalake(
-    table: DeltaTable,
-    partition_col: str,
-    year: int,
 ) -> pd.DataFrame:
-    """Read one hive partition using the most compatible deltalake API available."""
-    for kwargs in (
-        {"partitions": [(partition_col, str(year))]},
-        {"filters": [(partition_col, "=", year)]},
-        {"filters": [(partition_col, "in", [year])]},
-    ):
-        try:
-            return table.to_pandas(**kwargs)
-        except Exception:
-            continue
+    """Read active Delta files directly — bypasses pyarrow dataset partition parsing."""
+    s3_client = _build_s3_client(storage_options)
+    frames: list[pd.DataFrame] = []
 
-    try:
-        arrow = table.to_pyarrow_table(filters=[(partition_col, "=", year)])
-        return arrow.to_pandas(timestamp_as_object=True)
-    except Exception:
+    if years and partition_col:
+        for year in years:
+            uris = table.file_uris(
+                partition_filters=[(partition_col, "=", str(year))]
+            )
+            if not uris:
+                continue
+            bucket, _ = _parse_s3_uri(uris[0])
+            keys = [key for _, key in _uris_to_keys(uris)]
+            part = _read_parquet_objects(s3_client, bucket, keys)
+            if partition_col not in part.columns:
+                part = part.copy()
+                part[partition_col] = year
+            if not part.empty:
+                frames.append(part)
+    else:
+        uris = table.file_uris()
+        if not uris:
+            return pd.DataFrame()
+        bucket, _ = _parse_s3_uri(uris[0])
+        keys = [key for _, key in _uris_to_keys(uris)]
+        return _read_parquet_objects(s3_client, bucket, keys)
+
+    if not frames:
         return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
 
 
 def _read_via_deltalake(
@@ -105,24 +112,8 @@ def _read_via_deltalake(
     years: list[int] | None,
     partition_col: str | None,
 ) -> pd.DataFrame:
-    """Read via deltalake (local dev and non-Databricks runtimes)."""
     if years and partition_col:
-        try:
-            return table.to_pandas(filters=[(partition_col, "in", years)])
-        except Exception as filtered_exc:
-            logger.warning(
-                "deltalake filtered read failed (%s); retrying partition-by-partition.",
-                filtered_exc,
-            )
-            frames: list[pd.DataFrame] = []
-            for year in years:
-                part = _read_single_partition_deltalake(table, partition_col, year)
-                if not part.empty:
-                    frames.append(part)
-            if frames:
-                return pd.concat(frames, ignore_index=True)
-            raise filtered_exc
-
+        return table.to_pandas(filters=[(partition_col, "in", years)])
     return table.to_pandas()
 
 
@@ -139,17 +130,28 @@ def read_delta_to_pandas(
     Raises:
         RuntimeError: When the table cannot be read by any backend.
     """
+    table = DeltaTable(path, storage_options=storage_options)
     errors: list[str] = []
 
-    spark_df = _read_via_spark(path, years=years, partition_col=partition_col)
-    if spark_df is not None:
-        return spark_df
-
     try:
-        table = DeltaTable(path, storage_options=storage_options)
         return _read_via_deltalake(table, years=years, partition_col=partition_col)
     except Exception as exc:
         errors.append(f"deltalake: {exc}")
+        logger.warning(
+            "deltalake read failed for %s (%s); trying file_uris + boto3.",
+            path,
+            exc,
+        )
+
+    try:
+        return _read_via_file_uris(
+            table,
+            storage_options,
+            years=years,
+            partition_col=partition_col,
+        )
+    except Exception as exc:
+        errors.append(f"file_uris+boto3: {exc}")
 
     raise RuntimeError(
         f"Could not read Delta table at {path}. Attempts: {'; '.join(errors)}"
