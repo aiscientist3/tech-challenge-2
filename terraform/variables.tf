@@ -295,9 +295,9 @@ variable "silver_job_pypi_dependencies" {
   type        = list(string)
   default = [
     "numpy==1.26.4",
-    "pyarrow==15.0.2",
+    "pyarrow==17.0.0",
     "pandas==2.2.3",
-    "deltalake>=0.18.0",
+    "deltalake==0.22.3",
     "boto3>=1.34.0",
   ]
 }
@@ -353,9 +353,9 @@ variable "gold_job_pypi_dependencies" {
   type        = list(string)
   default = [
     "numpy==1.26.4",
-    "pyarrow==15.0.2",
+    "pyarrow==17.0.0",
     "pandas==2.2.3",
-    "deltalake>=0.18.0",
+    "deltalake==0.22.3",
     "boto3>=1.34.0",
   ]
 }

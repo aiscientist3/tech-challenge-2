@@ -18,7 +18,11 @@ import time
 from typing import Any
 
 from kafka import KafkaProducer
-from kafka.errors import NoBrokersAvailable
+
+try:
+    from kafka.errors import NoBrokersAvailable
+except ImportError:  # kafka-python 3.x
+    from kafka.errors import KafkaConnectionError as NoBrokersAvailable
 
 from ingestion.batch.config import DEFAULT_KAFKA_TOPIC, DEFAULT_YEARS
 from ingestion.batch.connections.aws_credentials import resolve_kafka_config
