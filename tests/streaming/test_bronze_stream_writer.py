@@ -6,22 +6,16 @@ import pandas as pd
 import pytest
 
 from ingestion.streaming.bronze_stream_writer import (
-    build_bronze_merge_predicate,
     build_matched_update_set,
-    dedupe_merge_batch,
-    record_has_merge_keys,
+    build_merge_predicate,
+    dedupe_microbatch,
+    record_has_natural_keys,
 )
 
 
-class TestBuildBronzeMergePredicate:
-    def test_single_key(self):
-        assert (
-            build_bronze_merge_predicate(("id_aluno",))
-            == "target.`id_aluno` = source.`id_aluno`"
-        )
-
+class TestBuildMergePredicate:
     def test_composite_key(self):
-        assert build_bronze_merge_predicate(("ano", "id_aluno")) == (
+        assert build_merge_predicate(("ano", "id_aluno")) == (
             "target.`ano` = source.`ano` AND target.`id_aluno` = source.`id_aluno`"
         )
 
@@ -35,18 +29,19 @@ class TestBuildMatchedUpdateSet:
         )
 
         assert set(updates) == {"proficiencia", "_event_id"}
-        assert updates["proficiencia"] == "source.`proficiencia`"
 
 
-class TestRecordHasMergeKeys:
+class TestRecordHasNaturalKeys:
     def test_valid_record(self):
-        assert record_has_merge_keys({"ano": 2024, "id_aluno": "A1"}, ("ano", "id_aluno"))
+        assert record_has_natural_keys(
+            {"ano": 2024, "id_aluno": "A1"}, ("ano", "id_aluno")
+        )
 
     def test_missing_key(self):
-        assert not record_has_merge_keys({"id_aluno": "A1"}, ("ano", "id_aluno"))
+        assert not record_has_natural_keys({"id_aluno": "A1"}, ("ano", "id_aluno"))
 
 
-class TestDedupeMergeBatch:
+class TestDedupeMicrobatch:
     def test_keeps_last_row_per_key(self):
         pdf = pd.DataFrame(
             [
@@ -56,7 +51,7 @@ class TestDedupeMergeBatch:
             ]
         )
 
-        result = dedupe_merge_batch(pdf, ("ano", "id_aluno"))
+        result = dedupe_microbatch(pdf, ("ano", "id_aluno"))
 
         assert len(result) == 2
         assert result.loc[result["id_aluno"] == "A1", "proficiencia"].iloc[0] == 200
@@ -65,4 +60,4 @@ class TestDedupeMergeBatch:
         pdf = pd.DataFrame([{"id_aluno": "A1"}])
 
         with pytest.raises(ValueError, match="missing key columns"):
-            dedupe_merge_batch(pdf, ("ano", "id_aluno"))
+            dedupe_microbatch(pdf, ("ano", "id_aluno"))

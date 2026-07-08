@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
 
+from ingestion.common.dbutils import get_dbutils
 from ingestion.batch.config import (
     AWS_ACCESS_KEY_ID_SECRET,
     AWS_S3_BUCKET_SECRET_KEY,
@@ -28,25 +28,6 @@ from ingestion.batch.config import (
 logger = logging.getLogger(__name__)
 
 
-def _get_dbutils() -> Any | None:
-    try:
-        from pyspark.dbutils import DBUtils  # type: ignore[import-untyped]
-        from pyspark.sql import SparkSession
-
-        spark = SparkSession.getActiveSession()
-        if spark is not None:
-            return DBUtils(spark)
-    except (ImportError, AttributeError, RuntimeError):
-        pass
-
-    try:
-        import IPython  # type: ignore[import-untyped]
-
-        return IPython.get_ipython().user_ns.get("dbutils")
-    except Exception:
-        return None
-
-
 def resolve_s3_bucket() -> str:
     """
     Resolve the S3 bucket name from Databricks Secrets or environment variable.
@@ -54,7 +35,7 @@ def resolve_s3_bucket() -> str:
     Raises:
         RuntimeError: When the bucket name cannot be resolved.
     """
-    dbutils = _get_dbutils()
+    dbutils = get_dbutils()
     if dbutils is not None:
         try:
             bucket = dbutils.secrets.get(
@@ -92,7 +73,7 @@ def resolve_aws_storage_options() -> dict[str, str]:
     """
     aws_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 
-    dbutils = _get_dbutils()
+    dbutils = get_dbutils()
     if dbutils is not None:
         try:
             access_key = dbutils.secrets.get(
@@ -154,7 +135,7 @@ def resolve_aws_storage_options() -> dict[str, str]:
 
 def resolve_kafka_config() -> tuple[str, str]:
     """Resolve Kafka bootstrap servers and topic from Databricks Secrets or env vars."""
-    dbutils = _get_dbutils()
+    dbutils = get_dbutils()
     if dbutils is not None:
         try:
             bootstrap = dbutils.secrets.get(

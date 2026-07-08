@@ -168,14 +168,7 @@ qualidade:
       tipo: completude
       coluna: ano
       descricao: Coluna ano não deve ser nula
-    - id: meta_brasil_chave_unica
-      tipo: unicidade
-      colunas: [ano, rede]
-      descricao: Combinação ano + rede deve ser única por carga
-    - id: meta_brasil_taxas_faixa
-      tipo: dominio
-      descricao: Taxa de alfabetização, metas e percentual de participação entre 0 e 100
-  status_implementacao: documentado
+  status_implementacao: implementado
 
 lineage:
   upstream:

@@ -28,7 +28,6 @@ from ingestion.batch.connections.aws_credentials import (
 )
 from ingestion.streaming.bronze_stream_writer import merge_upsert_to_bronze
 from ingestion.streaming.config import (
-    ALUNOS_BRONZE_MERGE_KEYS,
     ALUNOS_BRONZE_PARTITION_BY,
     alunos_silver_path,
     bronze_table_path,
@@ -78,17 +77,16 @@ def main() -> None:
         pdf,
         bronze_path=bronze_path,
         storage_options=storage_options,
-        merge_keys=ALUNOS_BRONZE_MERGE_KEYS,
         partition_by=ALUNOS_BRONZE_PARTITION_BY,
     )
-    print(f"Bronze MERGE: {bronze_rows} row(s)")
+    print(f"Bronze upsert: {bronze_rows} row(s)")
 
     silver_rows = process_bronze_to_silver_microbatch(
         pdf,
         silver_path=silver_path,
         storage_options=storage_options,
     )
-    print(f"Silver MERGE: {silver_rows} row(s)")
+    print(f"Silver upsert: {silver_rows} row(s)")
 
     silver_df = DeltaTable(silver_path, storage_options=storage_options).to_pandas()
     match = silver_df[silver_df["id_aluno"] == TEST_ID_ALUNO]

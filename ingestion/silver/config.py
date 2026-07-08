@@ -19,6 +19,9 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 BRONZE_PREFIX: str = os.getenv("BRONZE_PREFIX", "bronze/br_inep_alfabetizacao")
 SILVER_PREFIX: str = os.getenv("SILVER_PREFIX", "silver/br_inep_alfabetizacao")
+QUARANTINE_PREFIX: str = os.getenv(
+    "QUARANTINE_PREFIX", "quarantine/br_inep_alfabetizacao"
+)
 
 # ---------------------------------------------------------------------------
 # Runtime defaults
@@ -50,6 +53,16 @@ ENRICHMENT_JOINS: dict[str, tuple[str, str, str]] = {
     "meta_uf": ("uf", "sigla_uf", "sigla"),
     "meta_municipio": ("municipio", "id_municipio", "id_municipio"),
 }
+
+def quarantine_table_path(
+    bucket: str,
+    entity_name: str,
+    *,
+    layer: str = "silver",
+    quarantine_prefix: str = QUARANTINE_PREFIX,
+) -> str:
+    """S3 URI for quarantined rows (append-only Delta)."""
+    return f"s3://{bucket}/{quarantine_prefix}/{layer}/{entity_name}"
 
 
 @dataclass(frozen=True)

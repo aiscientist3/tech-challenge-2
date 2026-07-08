@@ -55,7 +55,7 @@
         "deltalake>=0.18.0",
         "boto3>=1.34.0"
       ],
-      "notes": "Kafka → Bronze MERGE → Silver MERGE (alunos). Um único job; Silver streaming NÃO é job separado. Requer Volume UC para checkpoint: workspace.streaming.streaming_checkpoints."
+      "notes": "Kafka → Bronze MERGE → Silver MERGE (alunos). Sem duplicatas por (ano, id_aluno). Requer Volume UC: workspace.streaming.streaming_checkpoints."
     },
     {
       "name": "silver_batch_ingestion",
