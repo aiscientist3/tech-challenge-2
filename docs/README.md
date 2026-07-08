@@ -4,6 +4,8 @@ Catálogo das entidades ingeridas na **camada Bronze** do pipeline de alfabetiza
 
 Metadados estruturados ficam em [`docs/catalogo/`](catalogo/).
 
+Estimativa de custos (FinOps): [`finops-estimativa-custos.md`](finops-estimativa-custos.md).
+
 ---
 
 ## Governança

@@ -278,13 +278,106 @@ python -m ingestion.batch.main --sources alunos --years 2024 --append
 
 ---
 
-## FinOps
+## FinOps — Otimização de Custos da Arquitetura
 
-- Filtrar por `ano` no BigQuery antes de transferir dados
-- Usar `--row-limit` durante desenvolvimento para reduzir custo por query
-- Particionar Delta por `ano` no S3 para varreduras seletivas
-- Lifecycle policy no S3 para dados Bronze antigos (via Terraform — transição para IA após 90 dias)
-- Reservar slots BigQuery para workloads recorrentes *(a avaliar)*
+Práticas de **FinOps** do pipeline híbrido (Batch + Streaming) com arquitetura
+Medalhão (Bronze → Silver → Gold) em **AWS S3 + Delta Lake + Databricks**.
+
+O objetivo é minimizar o custo total de propriedade (TCO) sem comprometer
+rastreabilidade, qualidade e latência analítica exigidas pelo Compromisso
+Nacional Criança Alfabetizada.
+
+Estimativa monetária detalhada: [`docs/finops-estimativa-custos.md`](docs/finops-estimativa-custos.md).
+
+### Princípios adotados
+
+| Princípio | Como aplicamos |
+|---|---|
+| Pagar pelo uso | Databricks Jobs **Serverless** (sem cluster ocioso) |
+| Armazenar barato, processar sob demanda | S3 + Delta (Parquet/Snappy) + lifecycle por camada |
+| Ler só o necessário | Particionamento + predicate pushdown + projeção de colunas |
+| Separar hot/cold | Bronze envelhece para STANDARD_IA; Silver/Gold ficam hot |
+| Qualidade com custo controlado | Quarentena Delta append-only; DLQ Bronze em modo lean (log only) |
+| Observabilidade de custo operacional | CloudWatch (duração, volume, falhas, quarantine/pass rate) + alertas SNS |
+
+### 1. Uso eficiente de armazenamento
+
+- **Formato colunar**: Delta Lake sobre **Parquet + compressão Snappy** — reduz volume em ~60–80% vs CSV/JSON e habilita leitura parcial de colunas.
+- **Particionamento**:
+  - Bronze: `ano` (alinhado ao ciclo do Censo/SAEB e às metas INEP).
+  - Silver: `ano` (+ `sigla_uf` quando houver consulta regional frequente).
+  - Gold: `ano` (e `sigla_uf` quando houver drill-down estadual).
+  - Quarentena: `ano` quando a coluna existir (`quarantine/br_inep_alfabetizacao/{layer}/{entity}`).
+- **Evitar over-partitioning**: não particionamos por `id_municipio`/`id_aluno` (alta cardinalidade → small files e custo de LIST no S3).
+- **Ciclo de vida (S3 Lifecycle via Terraform)**:
+  - Prefixo `bronze/` → **STANDARD_IA após 90 dias** (dados brutos raramente relidos após a promoção para Silver).
+  - Abort de multipart uploads incompletos em 7 dias (evita lixo cobrado).
+  - Silver/Gold permanecem em STANDARD (acesso analítico frequente).
+  - Prefixo `quarantine/` ainda sem lifecycle dedicado — monitorar crescimento e, se necessário, aplicar IA/expiração (recomendação FinOps).
+- **Idempotência com overwrite por partição**: reprocessamentos não duplicam histórico descontrolado; reduz crescimento silencioso do lake.
+- **Quarentena vs DLQ (trade-off FinOps)**:
+  - Silver/Gold: linhas inválidas vão para **Delta em S3** (append) — custo de storage baixo, mas cresce se a taxa de rejeição for alta.
+  - Bronze streaming: eventos malformados ficam em **DLQ lean (somente log)** — não persistem payload no S3, evitando custo de armazenamento de lixo.
+
+### 2. Otimização de queries (evitar full scans)
+
+- **Filtro na origem (BigQuery)**: `WHERE ano IN (...)` antes do transfer — reduz *bytes billed* na GCP e o volume ingressado no S3.
+- **Predicate pushdown / partition pruning**: leituras Silver/Gold devem aplicar filtros de `ano` (e `sigla_uf`) **antes** de materializar em memória, evitando carregar a tabela inteira.
+- **Column pruning**: jobs Gold selecionam apenas colunas analíticas (`taxa`, `peso_aluno`, chaves territoriais), não o payload completo de microdados.
+- **Agregação na Gold**: indicadores municipais/UF são pré-calculados; o consumo analítico não precisa varrer `alunos` a cada dashboard.
+- **Dev safeguards**: `--row-limit` / `DEV_ROW_LIMIT` para experimentos sem varrer a tabela completa de alunos.
+
+### 3. Controle de recursos computacionais
+
+#### Batch (metas, diretórios, indicadores)
+
+- Jobs Databricks **Serverless** com timeout (ex.: 3600s) — custo proporcional à duração da execução.
+- Schedule **desligado por padrão** em dev; em produção, cron pontual (ex.: Bronze 06:00 → Silver 07:00 → Gold 08:00), não cluster permanente.
+- Sequência Silver → Gold com 1 h de folga evita rodar Gold sobre Silver incompleto (DBU desperdiçado).
+- Parâmetros `--sources` / `--entities` / `--years` limitam o escopo de cada run.
+- Concorrência controlada: um job por camada (Bronze → Silver → Gold), evitando contenção e reprocessamento paralelo da mesma partição.
+- **Qualidade no caminho crítico**: validação (completude, domínio, referencial, faixa) roda em pandas dentro do mesmo job — overhead típico de poucos minutos de DBU; em troca, evita propagar lixo para Gold/BI.
+
+#### Streaming (`alunos` via Kafka)
+
+- **Não** mantemos cluster Spark 24×7.
+- Usamos `Trigger.AvailableNow` (micro-batch sob demanda): o job sobe, consome o backlog, faz MERGE em Bronze/Silver e **encerra**.
+- Schedule curto (ex.: a cada 5 min) só quando habilitado — padrão “quase tempo real” com custo de job efêmero.
+- `maxOffsetsPerTrigger` limita o tamanho do micro-batch (controle de memória/DBU).
+- Checkpoints evitam reprocessar offsets já commitados (custo + consistência).
+- Eventos Kafka inválidos: **DLQ lean (log only)** — sem escrita S3 de payload rejeitado.
+- Silver streaming: só faz MERGE das linhas válidas; inválidas vão para quarentena (mesmo prefixo batch).
+
+#### Escolha batch vs streaming (custo)
+
+| Carga | Modo | Justificativa FinOps |
+|---|---|---|
+| Metas Brasil/UF/Município, diretórios | Batch pontual | Volume pequeno, atualização anual/esporádica |
+| Microdados `alunos` | Streaming em micro-batches | Simula chegada contínua sem pagar idle 24×7 |
+| Indicadores Gold | Batch após Silver | Agregação barata sobre dados já tratados |
+| Rejeições de qualidade | Quarentena S3 (Silver/Gold) / log (Bronze DLQ) | Isola lixo sem inflar camadas analíticas |
+
+### 4. Decisões técnicas que reduzem custo operacional
+
+1. **Delta Lake em vez de CSV/JSON** → menos GB-mês no S3 e menos I/O por query.
+2. **Serverless em vez de cluster clássico sempre ligado** → elimina idle DBUs.
+3. **Lifecycle Bronze → IA** → armazenamento frio mais barato para raw.
+4. **Filtros na origem (BQ) + pushdown no lake** → menos compute e menos egress.
+5. **Gold pré-agregada** → BI/consultas leem MB, não GB de microdados.
+6. **Qualidade com quarentena** → Silver/Gold só recebem linhas válidas; reduz reprocessamento e dashboards “sujos”.
+7. **DLQ Bronze lean (log only)** → não paga storage por eventos Kafka malformados.
+8. **Monitoramento de duração/volume/qualidade (CloudWatch)** → detecta regressões de custo e picos de quarentena antes da fatura mensal.
+9. **IaC (Terraform)** → ambientes reproduzíveis; evita recursos órfãos esquecidos.
+
+### 5. O que monitorar (sinais de custo)
+
+| Sinal | Ferramenta | Ação se degradar |
+|---|---|---|
+| `DurationSeconds` do job | CloudWatch + alarme | Revisar anos/escopo, small files, skew, regras de qualidade |
+| `RecordsIngested` | CloudWatch | Validar filtros BQ / row-limit |
+| `quality_quarantine_rows` / `quality_pass_rate` | CloudWatch | Investigar regra/fonte; alta quarentena = mais S3 append + DBU |
+| Crescimento S3 por prefixo (`bronze/`, `silver/`, `gold/`, `quarantine/`) | S3 Inventory / Cost Explorer | Ajustar lifecycle / VACUUM / expiração da quarentena |
+| Falhas repetidas | SNS + e-mail Databricks | Evitar retries caros em loop |
 
 ---
 
@@ -310,12 +403,15 @@ python -m ingestion.batch.main --sources alunos --years 2024 --append
 - [ ] Persistência de eventos na camada Bronze/Silver
 
 ### Qualidade de Dados
-- [ ] Great Expectations ou dbt tests na Silver
-- [ ] Validação de completude, unicidade e domínios
-- [ ] Alertas automáticos em falhas de qualidade
+- [x] Validação Silver/Gold orientada ao catálogo YAML (completude, domínio, referencial, faixa)
+- [x] Quarentena Delta em S3 (`quarantine/...`) + métricas CloudWatch de pass rate
+- [x] DLQ lean no Bronze streaming (eventos malformados em log, sem persistir no S3)
+- [ ] Alertas CloudWatch dedicados a `quality_pass_rate` / pico de quarentena
+- [ ] Lifecycle/expiração do prefixo `quarantine/` (FinOps)
 
 ### Monitoramento
 - [x] Métricas de execução por job (registros, duração, falhas) — CloudWatch custom metrics + dashboard
+- [x] Métricas de qualidade (`quality_quarantine_rows`, `quality_pass_rate`) por camada/entidade
 - [x] CloudWatch Alarms — falha, duração, zero registros, S3 5xx
 - [x] Databricks job alerts (e-mail)
 
@@ -338,3 +434,4 @@ Ver [`terraform/README.md`](terraform/README.md) para aplicar a infraestrutura.
 - [Documentação BigQuery — Base dos Dados](https://basedosdados.org/docs/access_data_bq)
 - [Delta Lake Documentation](https://docs.delta.io)
 - [Databricks Secrets Guide](https://docs.databricks.com/en/security/secrets/index.html)
+- [Estimativa de Custo Teórica (FinOps)](docs/finops-estimativa-custos.md)
