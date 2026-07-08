@@ -1,10 +1,11 @@
 """
 Silver layer writer for streaming alunos — reads from Bronze, never from Kafka.
 
-Medallion rule: Kafka → Bronze (only) → Silver.
+Medallion rule: Kafka → Bronze (MERGE) → Silver (MERGE).
 
-After each Bronze micro-batch is persisted, Silver transforms that Bronze slice
-and upserts into the Silver Delta table by (ano, id_aluno).
+After each Bronze micro-batch is persisted, Silver transforms that Bronze slice,
+validates quality, quarantines invalid rows, and upserts only valid rows into
+Silver by (ano, id_aluno) — no duplicate keys.
 """
 
 from __future__ import annotations
@@ -14,10 +15,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from ingestion.silver.transforms import standardize_common
+from ingestion.silver.quality import validate_entity
+from ingestion.silver.quarantine_writer import QuarantineWriter
+from ingestion.silver.transforms import deduplicate, standardize_common
+from ingestion.streaming.bronze_stream_writer import merge_upsert_to_delta_table
 from ingestion.streaming.config import (
-    ALUNOS_SILVER_MERGE_KEYS,
-    ALUNOS_SILVER_MERGE_PRESERVE_COLUMNS,
+    ALUNOS_NATURAL_KEYS,
     ALUNOS_SILVER_PARTITION_BY,
 )
 
@@ -28,12 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def load_bronze_microbatch_for_silver(bronze_written_pdf: pd.DataFrame) -> pd.DataFrame:
-    """
-    Return the Bronze slice used as Silver input (medallion: Silver ← Bronze).
-
-    The micro-batch must already be merged into Bronze before calling this.
-    The returned DataFrame is the authoritative Bronze content for these keys.
-    """
+    """Return the Bronze slice used as Silver input (medallion: Silver ← Bronze)."""
     return bronze_written_pdf.copy()
 
 
@@ -48,6 +46,7 @@ def prepare_alunos_silver_batch(
         return pdf
 
     treated = standardize_common(pdf)
+    treated = deduplicate(treated, ALUNOS_NATURAL_KEYS, entity_name="alunos")
     treated = treated.copy()
     treated["_silver_processed_at"] = ingestion_ts
     treated["_silver_ingestion_mode"] = "stream"
@@ -61,19 +60,16 @@ def merge_upsert_to_silver(
     *,
     silver_path: str,
     storage_options: dict[str, str],
-    merge_keys: tuple[str, ...] = ALUNOS_SILVER_MERGE_KEYS,
-    preserve_columns: tuple[str, ...] = ALUNOS_SILVER_MERGE_PRESERVE_COLUMNS,
+    merge_keys: tuple[str, ...] = ALUNOS_NATURAL_KEYS,
     partition_by: str | None = ALUNOS_SILVER_PARTITION_BY,
 ) -> int:
-    """Upsert rows into Silver Delta using the shared Delta merge helper."""
-    from ingestion.streaming.bronze_stream_writer import merge_upsert_to_bronze
-
-    return merge_upsert_to_bronze(
+    """Upsert rows into Silver Delta (no duplicate keys)."""
+    return merge_upsert_to_delta_table(
         pdf,
-        bronze_path=silver_path,
+        table_path=silver_path,
         storage_options=storage_options,
         merge_keys=merge_keys,
-        preserve_columns=preserve_columns,
+        preserve_columns=(),
         partition_by=partition_by,
     )
 
@@ -85,8 +81,9 @@ def process_bronze_to_silver_microbatch(
     storage_options: dict[str, str],
     stream_batch_id: str | None = None,
     ingestion_ts: str | None = None,
-    merge_keys: tuple[str, ...] = ALUNOS_SILVER_MERGE_KEYS,
     partition_by: str | None = ALUNOS_SILVER_PARTITION_BY,
+    references: dict[str, pd.DataFrame] | None = None,
+    bucket: str | None = None,
 ) -> int:
     """
     Transform a Bronze micro-batch and upsert into Silver.
@@ -105,16 +102,35 @@ def process_bronze_to_silver_microbatch(
         stream_batch_id=resolved_batch_id,
         ingestion_ts=resolved_ts,
     )
+    quality = validate_entity(silver_pdf, "alunos", references or {})
+
+    if not quality.quarantine_df.empty and bucket:
+        QuarantineWriter(storage_options, bucket).write(
+            quality.quarantine_df,
+            entity_name="alunos",
+            batch_id=resolved_batch_id,
+            partition_by=partition_by,
+            layer="silver",
+        )
+
+    if quality.valid_df.empty:
+        logger.warning(
+            "Silver micro-batch: all %d rows quarantined — skipping MERGE.",
+            quality.quarantine_count,
+        )
+        return 0
+
     merged_rows = merge_upsert_to_silver(
-        silver_pdf,
+        quality.valid_df,
         silver_path=silver_path,
         storage_options=storage_options,
-        merge_keys=merge_keys,
         partition_by=partition_by,
     )
     logger.info(
-        "Silver micro-batch upserted from Bronze slice: %d records → %s",
+        "Silver micro-batch upserted from Bronze slice: %d records → %s "
+        "(%d quarantined)",
         merged_rows,
         silver_path,
+        quality.quarantine_count,
     )
     return merged_rows

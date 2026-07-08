@@ -13,8 +13,9 @@ import logging
 import os
 import sys
 import uuid
-from typing import Any
 
+from ingestion.batch.metrics import publish_quality_metrics
+from ingestion.common.dbutils import get_dbutils
 from ingestion.batch.connections.aws_credentials import (
     resolve_aws_storage_options,
     resolve_s3_bucket,
@@ -27,33 +28,20 @@ from ingestion.gold.config import (
     silver_table_path,
 )
 from ingestion.gold.gold_writer import GoldWriter
+from ingestion.gold.quality import (
+    log_meta_coverage_warning,
+    validate_indicador_municipio,
+    validate_indicador_uf,
+)
 from ingestion.gold.silver_reader import read_silver
 from ingestion.gold.transforms import build_indicador_municipio, build_indicador_uf
+from ingestion.silver.quarantine_writer import QuarantineWriter
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-
-def _get_dbutils() -> Any | None:
-    try:
-        from pyspark.dbutils import DBUtils  # type: ignore[import-untyped]
-        from pyspark.sql import SparkSession
-
-        spark = SparkSession.getActiveSession()
-        if spark is not None:
-            return DBUtils(spark)
-    except Exception:
-        pass
-
-    try:
-        import IPython  # type: ignore[import-untyped]
-
-        return IPython.get_ipython().user_ns.get("dbutils")
-    except Exception:
-        return None
 
 
 def _cli_args_provided() -> bool:
@@ -66,7 +54,7 @@ def _cli_args_provided() -> bool:
 
 
 def _config_from_widgets() -> GoldRunConfig | None:
-    dbutils = _get_dbutils()
+    dbutils = get_dbutils()
     if dbutils is None:
         return None
 
@@ -182,6 +170,7 @@ def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
     bucket = _resolve_bucket()
     gold_configs = build_gold_configs(bucket)
     writer = GoldWriter(storage_options)
+    quarantine_writer = QuarantineWriter(storage_options, bucket)
 
     logger.info("S3 bucket: %s", bucket)
 
@@ -209,26 +198,75 @@ def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
     )
 
     results: dict[str, str | None] = {}
+    quarantine_counts: dict[str, int] = {}
+    record_counts: dict[str, int] = {}
 
     if "indicador_crianca_alfabetizada_municipio" in run_config.datasets:
         logger.info("--- Building indicador_crianca_alfabetizada_municipio ---")
         indicador_mun = build_indicador_municipio(alunos, meta_municipio)
-        results["indicador_crianca_alfabetizada_municipio"] = writer.write(
+        log_meta_coverage_warning(
             indicador_mun,
+            dataset_name="indicador_crianca_alfabetizada_municipio",
+        )
+        mun_quality = validate_indicador_municipio(
+            indicador_mun, meta_municipio, municipio
+        )
+        if not mun_quality.quarantine_df.empty:
+            quarantine_writer.write(
+                mun_quality.quarantine_df,
+                entity_name="indicador_crianca_alfabetizada_municipio",
+                batch_id=batch_id,
+                partition_by="ano",
+                layer="gold",
+            )
+        results["indicador_crianca_alfabetizada_municipio"] = writer.write(
+            mun_quality.valid_df,
             gold_configs["indicador_crianca_alfabetizada_municipio"],
             batch_id=batch_id,
             overwrite=run_config.overwrite,
+        )
+        quarantine_counts["indicador_crianca_alfabetizada_municipio"] = (
+            mun_quality.quarantine_count
+        )
+        record_counts["indicador_crianca_alfabetizada_municipio"] = len(
+            mun_quality.valid_df
         )
 
     if "indicador_crianca_alfabetizada_uf" in run_config.datasets:
         logger.info("--- Building indicador_crianca_alfabetizada_uf ---")
         indicador_uf = build_indicador_uf(alunos, municipio, meta_uf)
-        results["indicador_crianca_alfabetizada_uf"] = writer.write(
+        log_meta_coverage_warning(
             indicador_uf,
+            dataset_name="indicador_crianca_alfabetizada_uf",
+        )
+        uf_quality = validate_indicador_uf(indicador_uf, meta_uf, municipio)
+        if not uf_quality.quarantine_df.empty:
+            quarantine_writer.write(
+                uf_quality.quarantine_df,
+                entity_name="indicador_crianca_alfabetizada_uf",
+                batch_id=batch_id,
+                partition_by="ano",
+                layer="gold",
+            )
+        results["indicador_crianca_alfabetizada_uf"] = writer.write(
+            uf_quality.valid_df,
             gold_configs["indicador_crianca_alfabetizada_uf"],
             batch_id=batch_id,
             overwrite=run_config.overwrite,
         )
+        quarantine_counts["indicador_crianca_alfabetizada_uf"] = (
+            uf_quality.quarantine_count
+        )
+        record_counts["indicador_crianca_alfabetizada_uf"] = len(uf_quality.valid_df)
+
+    environment = os.getenv("ENVIRONMENT", "dev")
+    publish_quality_metrics(
+        batch_id=batch_id,
+        environment=environment,
+        layer="gold",
+        quarantine_counts=quarantine_counts,
+        record_counts=record_counts,
+    )
 
     logger.info("=== GOLD PROCESSING COMPLETED ===")
     return results

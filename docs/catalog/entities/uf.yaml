@@ -113,15 +113,7 @@ qualidade:
       tipo: completude
       coluna: nome
       descricao: Coluna nome não deve ser nula
-    - id: uf_sigla_unica
-      tipo: unicidade
-      coluna: sigla
-      descricao: Sigla da UF única por carga
-    - id: uf_id_unico
-      tipo: unicidade
-      coluna: id_uf
-      descricao: ID IBGE da UF único por carga
-  status_implementacao: documentado
+  status_implementacao: implementado
 
 lineage:
   upstream:

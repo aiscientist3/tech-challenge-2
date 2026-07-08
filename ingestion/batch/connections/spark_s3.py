@@ -19,6 +19,7 @@ from typing import Any
 
 from pyspark.sql import SparkSession
 
+from ingestion.common.dbutils import get_dbutils
 from ingestion.batch.config import (
     AWS_ACCESS_KEY_ID_SECRET,
     AWS_SECRET_ACCESS_KEY_SECRET,
@@ -26,25 +27,6 @@ from ingestion.batch.config import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _get_dbutils() -> Any | None:
-    """Return Databricks dbutils when running inside a cluster."""
-    try:
-        from pyspark.dbutils import DBUtils  # type: ignore[import-untyped]
-
-        spark = SparkSession.getActiveSession()
-        if spark is not None:
-            return DBUtils(spark)
-    except (ImportError, AttributeError, RuntimeError):
-        pass
-
-    try:
-        import IPython  # type: ignore[import-untyped]
-
-        return IPython.get_ipython().user_ns.get("dbutils")
-    except Exception:
-        return None
 
 
 def _resolve_aws_credentials() -> tuple[str, str] | None:
@@ -55,7 +37,7 @@ def _resolve_aws_credentials() -> tuple[str, str] | None:
         (access_key_id, secret_access_key) tuple, or None to fall back
         to the Default Credential Provider Chain (IAM Instance Profile).
     """
-    dbutils = _get_dbutils()
+    dbutils = get_dbutils()
     if dbutils is not None:
         try:
             access_key = dbutils.secrets.get(

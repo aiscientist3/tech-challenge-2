@@ -2,10 +2,10 @@
 Bronze layer writer for Kafka streaming ingestion (Spark Structured Streaming).
 
 Medallion flow for alunos:
-  Kafka → Bronze Delta (MERGE) → Silver Delta (MERGE)
+  Kafka → Bronze Delta (MERGE, 1 row/aluno) → Silver Delta (MERGE, 1 row/aluno)
 
-Only Bronze consumes Kafka. Silver is derived from each Bronze micro-batch after
-persist (see ingestion.streaming.silver_stream_writer).
+Delta MERGE upserts by (ano, id_aluno) — no duplicate keys. New Parquet files may
+still be written by Delta internally; the table stays deduplicated at row level.
 
 Checkpoint must live on a Unity Catalog Volume on Databricks Serverless (DBFS root
 and Spark S3A checkpoints are blocked). See streaming/config.py.
@@ -23,11 +23,15 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.functions import col, from_json
 from pyspark.sql.streaming import StreamingQuery
 
+from ingestion.streaming.bronze_dlq import (
+    expand_kafka_microbatch,
+    record_has_natural_keys,
+)
 from ingestion.streaming.config import (
     ALUNOS_BQ_TABLE,
-    ALUNOS_BRONZE_MERGE_KEYS,
-    ALUNOS_BRONZE_MERGE_PRESERVE_COLUMNS,
     ALUNOS_BRONZE_PARTITION_BY,
+    ALUNOS_BRONZE_PRESERVE_COLUMNS,
+    ALUNOS_NATURAL_KEYS,
     DEFAULT_STREAM_SOURCE,
 )
 from ingestion.streaming.event_schema import KAFKA_EVENT_SCHEMA
@@ -38,7 +42,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def build_bronze_merge_predicate(
+def build_merge_predicate(
     merge_keys: tuple[str, ...],
     *,
     target_alias: str = "target",
@@ -50,27 +54,14 @@ def build_bronze_merge_predicate(
     )
 
 
-def dedupe_merge_batch(
-    pdf: pd.DataFrame,
-    merge_keys: tuple[str, ...],
-) -> pd.DataFrame:
-    """Keep one row per merge key within a micro-batch (last event wins)."""
-    missing = [key for key in merge_keys if key not in pdf.columns]
-    if missing:
-        raise ValueError(f"Cannot merge Bronze: missing key columns {missing}.")
-    if pdf.empty:
-        return pdf
-    return pdf.drop_duplicates(subset=list(merge_keys), keep="last").reset_index(drop=True)
-
-
 def build_matched_update_set(
     columns: list[str],
     *,
     merge_keys: tuple[str, ...],
-    preserve_columns: tuple[str, ...] = ALUNOS_BRONZE_MERGE_PRESERVE_COLUMNS,
+    preserve_columns: tuple[str, ...] = (),
     source_alias: str = "source",
 ) -> dict[str, str]:
-    """Columns to refresh from the stream source on MERGE match (keys/preserved excluded)."""
+    """Columns to refresh from source on MERGE match (keys and preserved excluded)."""
     skip = set(merge_keys) | set(preserve_columns)
     return {
         column: f"{source_alias}.`{column}`"
@@ -79,24 +70,34 @@ def build_matched_update_set(
     }
 
 
-def merge_upsert_to_bronze(
+def dedupe_microbatch(
+    pdf: pd.DataFrame,
+    natural_keys: tuple[str, ...],
+) -> pd.DataFrame:
+    """Keep one row per natural key within a micro-batch (last event wins)."""
+    missing = [key for key in natural_keys if key not in pdf.columns]
+    if missing:
+        raise ValueError(f"Cannot write Delta: missing key columns {missing}.")
+    if pdf.empty:
+        return pdf
+    return pdf.drop_duplicates(subset=list(natural_keys), keep="last").reset_index(drop=True)
+
+
+def merge_upsert_to_delta_table(
     pdf: pd.DataFrame,
     *,
-    bronze_path: str,
+    table_path: str,
     storage_options: dict[str, str],
-    merge_keys: tuple[str, ...] = ALUNOS_BRONZE_MERGE_KEYS,
-    preserve_columns: tuple[str, ...] = ALUNOS_BRONZE_MERGE_PRESERVE_COLUMNS,
+    merge_keys: tuple[str, ...] = ALUNOS_NATURAL_KEYS,
+    preserve_columns: tuple[str, ...] = (),
     partition_by: str | None = ALUNOS_BRONZE_PARTITION_BY,
 ) -> int:
     """
-    Upsert rows into Bronze Delta: update matched alunos, insert new ones.
+    Upsert rows into a Delta table: update matched keys, insert new ones.
 
-    Matched rows are updated from the stream except merge keys and preserve_columns
-    (e.g. legacy _batch_id from an earlier batch load).
-
-    Creates the table on first write when the Delta path does not exist yet.
+    Ensures at most one row per merge key in the table (no duplicates).
     """
-    pdf = dedupe_merge_batch(pdf, merge_keys)
+    pdf = dedupe_microbatch(pdf, merge_keys)
     if pdf.empty:
         return 0
 
@@ -106,9 +107,9 @@ def merge_upsert_to_bronze(
         else None
     )
 
-    if not DeltaTable.is_deltatable(bronze_path, storage_options=storage_options):
+    if not DeltaTable.is_deltatable(table_path, storage_options=storage_options):
         write_deltalake(
-            table_or_uri=bronze_path,
+            table_or_uri=table_path,
             data=pdf,
             mode="append",
             partition_by=partition_cols,
@@ -117,7 +118,7 @@ def merge_upsert_to_bronze(
         )
         return len(pdf)
 
-    delta_table = DeltaTable(bronze_path, storage_options=storage_options)
+    delta_table = DeltaTable(table_path, storage_options=storage_options)
     update_set = build_matched_update_set(
         list(pdf.columns),
         merge_keys=merge_keys,
@@ -125,7 +126,7 @@ def merge_upsert_to_bronze(
     )
     merger = delta_table.merge(
         source=pdf,
-        predicate=build_bronze_merge_predicate(merge_keys),
+        predicate=build_merge_predicate(merge_keys),
         source_alias="source",
         target_alias="target",
         merge_schema=True,
@@ -137,6 +138,26 @@ def merge_upsert_to_bronze(
         .execute()
     )
     return len(pdf)
+
+
+def merge_upsert_to_bronze(
+    pdf: pd.DataFrame,
+    *,
+    bronze_path: str,
+    storage_options: dict[str, str],
+    merge_keys: tuple[str, ...] = ALUNOS_NATURAL_KEYS,
+    preserve_columns: tuple[str, ...] = ALUNOS_BRONZE_PRESERVE_COLUMNS,
+    partition_by: str | None = ALUNOS_BRONZE_PARTITION_BY,
+) -> int:
+    """Upsert alunos into Bronze Delta (preserves legacy _batch_id on update)."""
+    return merge_upsert_to_delta_table(
+        pdf,
+        table_path=bronze_path,
+        storage_options=storage_options,
+        merge_keys=merge_keys,
+        preserve_columns=preserve_columns,
+        partition_by=partition_by,
+    )
 
 
 def read_kafka_stream(
@@ -180,16 +201,11 @@ def parse_kafka_envelope(kafka_df: DataFrame) -> DataFrame:
     )
 
 
-def record_has_merge_keys(record: dict, merge_keys: tuple[str, ...]) -> bool:
-    """Return True when all merge key columns are present and non-null."""
-    return all(record.get(key) is not None for key in merge_keys)
-
-
 def expand_payload_to_bronze_records(
     envelope_df: DataFrame,
     *,
     source_table: str = ALUNOS_BQ_TABLE,
-    merge_keys: tuple[str, ...] = ALUNOS_BRONZE_MERGE_KEYS,
+    natural_keys: tuple[str, ...] = ALUNOS_NATURAL_KEYS,
     ingestion_ts: str | None = None,
 ) -> list[dict]:
     """Expand JSON payloads into row dicts with streaming metadata."""
@@ -209,11 +225,11 @@ def expand_payload_to_bronze_records(
             continue
         if record.get("ano") is None and row.ano is not None:
             record["ano"] = int(row.ano)
-        if not record_has_merge_keys(record, merge_keys):
+        if not record_has_natural_keys(record, natural_keys):
             logger.warning(
-                "Skipping event %s: missing merge keys %s.",
+                "Skipping event %s: missing natural keys %s.",
                 row.event_id,
-                merge_keys,
+                natural_keys,
             )
             continue
         record["_event_id"] = row.event_id
@@ -240,7 +256,9 @@ def write_stream_to_bronze(
     silver_path: str | None = None,
     source_table: str = ALUNOS_BQ_TABLE,
     partition_by: str = ALUNOS_BRONZE_PARTITION_BY,
-    merge_keys: tuple[str, ...] = ALUNOS_BRONZE_MERGE_KEYS,
+    natural_keys: tuple[str, ...] = ALUNOS_NATURAL_KEYS,
+    silver_references: dict | None = None,
+    bucket: str | None = None,
 ) -> StreamingQuery:
     """Run Structured Streaming (Trigger.AvailableNow) to Bronze Delta (+ Silver)."""
 
@@ -249,30 +267,40 @@ def write_stream_to_bronze(
             logger.info("Micro-batch %d is empty — skipping.", micro_batch_id)
             return
 
-        envelope_df = parse_kafka_envelope(batch_df)
-        if envelope_df.isEmpty():
-            logger.info("Micro-batch %d has no valid events — skipping.", micro_batch_id)
-            return
-
         ingestion_ts = datetime.now(timezone.utc).isoformat()
-        records = expand_payload_to_bronze_records(
-            envelope_df,
+        stream_batch_id = f"stream-{micro_batch_id}-{ingestion_ts}"
+
+        kafka_rows = batch_df.select("value", "topic", "partition", "offset").collect()
+        expansion = expand_kafka_microbatch(
+            kafka_rows,
             source_table=source_table,
-            merge_keys=merge_keys,
+            natural_keys=natural_keys,
             ingestion_ts=ingestion_ts,
         )
-        if not records:
-            logger.info("Micro-batch %d produced no Bronze rows — skipping.", micro_batch_id)
+
+        if expansion.dlq_records:
+            logger.warning(
+                "Micro-batch %d: %d malformed Kafka events skipped (lean mode — log only).",
+                micro_batch_id,
+                len(expansion.dlq_records),
+            )
+
+        if not expansion.records:
+            logger.info(
+                "Micro-batch %d produced no Bronze rows (%d DLQ).",
+                micro_batch_id,
+                len(expansion.dlq_records),
+            )
             return
 
         import pandas as pd
 
-        pdf = pd.DataFrame(records)
+        pdf = pd.DataFrame(expansion.records)
         merged_rows = merge_upsert_to_bronze(
             pdf,
             bronze_path=bronze_path,
             storage_options=storage_options,
-            merge_keys=merge_keys,
+            merge_keys=natural_keys,
             partition_by=partition_by,
         )
         logger.info(
@@ -280,7 +308,7 @@ def write_stream_to_bronze(
             micro_batch_id,
             merged_rows,
             bronze_path,
-            merge_keys,
+            natural_keys,
         )
 
         if silver_path and merged_rows > 0:
@@ -292,7 +320,10 @@ def write_stream_to_bronze(
                 pdf,
                 silver_path=silver_path,
                 storage_options=storage_options,
+                stream_batch_id=stream_batch_id,
                 ingestion_ts=ingestion_ts,
+                references=silver_references,
+                bucket=bucket,
             )
             logger.info(
                 "Micro-batch %d propagated Bronze → Silver: %s",
@@ -315,6 +346,35 @@ def write_stream_to_bronze(
     return query
 
 
+def _load_streaming_silver_references(
+    bucket: str,
+    storage_options: dict[str, str],
+) -> dict:
+    """Load Silver reference tables needed for streaming alunos quality checks."""
+    from ingestion.gold.silver_reader import read_silver
+    from ingestion.silver.config import SILVER_PREFIX
+
+    municipio_path = f"s3://{bucket}/{SILVER_PREFIX}/municipio"
+    try:
+        municipio = read_silver(
+            municipio_path,
+            storage_options,
+            years=None,
+            partition_col=None,
+        )
+        logger.info(
+            "Loaded municipio reference for streaming quality: %d rows.",
+            len(municipio),
+        )
+        return {"municipio": municipio}
+    except Exception as exc:
+        logger.warning(
+            "Could not load municipio Silver reference for quality checks: %s",
+            exc,
+        )
+        return {}
+
+
 def run_kafka_to_bronze(
     spark: SparkSession,
     *,
@@ -327,9 +387,14 @@ def run_kafka_to_bronze(
     starting_offsets: str = "earliest",
     source_table: str = ALUNOS_BQ_TABLE,
     partition_by: str = ALUNOS_BRONZE_PARTITION_BY,
-    merge_keys: tuple[str, ...] = ALUNOS_BRONZE_MERGE_KEYS,
+    natural_keys: tuple[str, ...] = ALUNOS_NATURAL_KEYS,
+    bucket: str | None = None,
 ) -> None:
     """End-to-end: Kafka → Bronze Delta upsert (+ optional Silver from Bronze)."""
+    silver_references: dict | None = None
+    if silver_path and bucket:
+        silver_references = _load_streaming_silver_references(bucket, storage_options)
+
     kafka_df = read_kafka_stream(
         spark,
         bootstrap_servers=bootstrap_servers,
@@ -345,7 +410,9 @@ def run_kafka_to_bronze(
         silver_path=silver_path,
         source_table=source_table,
         partition_by=partition_by,
-        merge_keys=merge_keys,
+        natural_keys=natural_keys,
+        silver_references=silver_references,
+        bucket=bucket,
     )
     query.awaitTermination()
     logger.info(

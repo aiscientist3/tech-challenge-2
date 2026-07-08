@@ -281,15 +281,11 @@ qualidade:
       tipo: completude
       coluna: nome
       descricao: Coluna nome não deve ser nula
-    - id: municipio_id_unico
-      tipo: unicidade
-      coluna: id_municipio
-      descricao: ID município IBGE único por carga
     - id: municipio_id_formato
       tipo: dominio
       coluna: id_municipio
       descricao: ID município com 7 dígitos numéricos
-  status_implementacao: documentado
+  status_implementacao: implementado
 
 lineage:
   upstream:

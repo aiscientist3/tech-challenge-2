@@ -177,15 +177,20 @@ qualidade:
       tipo: completude
       coluna: ano
       descricao: Coluna ano não deve ser nula
-    - id: alunos_chave_unica
-      tipo: unicidade
-      colunas: [ano, id_aluno]
-      descricao: Combinação ano + id_aluno deve ser única por carga
+    - id: alunos_id_aluno_obrigatorio
+      tipo: completude
+      coluna: id_aluno
+      descricao: Coluna id_aluno não deve ser nula
     - id: alunos_id_municipio_formato
       tipo: dominio
       coluna: id_municipio
       descricao: ID município com 7 dígitos numéricos
-  status_implementacao: documentado  # testes automatizados pendentes (Silver)
+    - id: alunos_municipio_fk
+      tipo: referencial
+      coluna: id_municipio
+      referencia: municipio.id_municipio
+      descricao: id_municipio deve existir na tabela municipio
+  status_implementacao: implementado
 
 lineage:
   upstream:

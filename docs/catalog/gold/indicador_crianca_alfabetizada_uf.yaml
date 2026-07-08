@@ -1,0 +1,26 @@
+# Catálogo de qualidade — Gold: indicador Criança Alfabetizada por UF
+
+version: "1.0"
+dataset:
+  id: indicador_crianca_alfabetizada_uf
+  camada: gold
+  descricao: >
+    Indicador agregado por UF e rede, com validação cross-table antes da
+    publicação analítica.
+
+qualidade:
+  regras:
+    - id: gold_taxa_faixa
+      tipo: faixa
+      coluna: taxa_crianca_alfabetizada
+      min: 0
+      max: 100
+      descricao: Taxa calculada deve estar entre 0 e 100
+
+    - id: gold_referencia_territorial
+      tipo: referencial
+      coluna: sigla_uf
+      referencia: municipio.sigla_uf
+      descricao: sigla_uf deve existir na referência Silver municipio
+
+  status_implementacao: implementado

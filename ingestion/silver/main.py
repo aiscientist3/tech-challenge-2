@@ -14,8 +14,11 @@ import logging
 import os
 import sys
 import uuid
-from typing import Any
 
+import pandas as pd
+
+from ingestion.batch.metrics import publish_quality_metrics
+from ingestion.common.dbutils import get_dbutils
 from ingestion.batch.connections.aws_credentials import (
     resolve_aws_storage_options,
     resolve_s3_bucket,
@@ -27,6 +30,8 @@ from ingestion.silver.config import (
     SilverRunConfig,
     build_entity_configs,
 )
+from ingestion.silver.quality import QualityResult, validate_entity
+from ingestion.silver.quarantine_writer import QuarantineWriter
 from ingestion.silver.silver_writer import SilverWriter
 from ingestion.silver.transforms import (
     apply_enrichment,
@@ -41,25 +46,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _get_dbutils() -> Any | None:
-    try:
-        from pyspark.dbutils import DBUtils  # type: ignore[import-untyped]
-        from pyspark.sql import SparkSession
-
-        spark = SparkSession.getActiveSession()
-        if spark is not None:
-            return DBUtils(spark)
-    except Exception:
-        pass
-
-    try:
-        import IPython  # type: ignore[import-untyped]
-
-        return IPython.get_ipython().user_ns.get("dbutils")
-    except Exception:
-        return None
-
-
 def _cli_args_provided() -> bool:
     argv = sys.argv[1:]
     if len(argv) == 1 and argv[0].startswith("--"):
@@ -70,7 +56,7 @@ def _cli_args_provided() -> bool:
 
 
 def _config_from_widgets() -> SilverRunConfig | None:
-    dbutils = _get_dbutils()
+    dbutils = get_dbutils()
     if dbutils is None:
         return None
 
@@ -194,16 +180,19 @@ def _transform_entity(
     entity_name: str,
     df: pd.DataFrame,
     references: dict[str, pd.DataFrame],
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, QualityResult]:
     entity_config = build_entity_configs("placeholder")[entity_name]
 
     treated = standardize_common(df)
     treated = deduplicate(treated, entity_config.natural_key, entity_name=entity_name)
     treated = apply_enrichment(entity_name, treated, references)
-    return treated
+    quality = validate_entity(treated, entity_name, references)
+    return quality.valid_df, quality
 
 
-def run_silver(run_config: SilverRunConfig) -> tuple[dict[str, str | None], dict[str, int]]:
+def run_silver(
+    run_config: SilverRunConfig,
+) -> tuple[dict[str, str | None], dict[str, int], dict[str, int]]:
     batch_id = run_config.batch_id or str(uuid.uuid4())
     logger.info("=== SILVER PROCESSING STARTED ===")
     logger.info("Batch ID : %s", batch_id)
@@ -214,6 +203,7 @@ def run_silver(run_config: SilverRunConfig) -> tuple[dict[str, str | None], dict
     bucket = _resolve_bucket()
     entity_configs = build_entity_configs(bucket)
     writer = SilverWriter(storage_options)
+    quarantine_writer = QuarantineWriter(storage_options, bucket)
 
     logger.info("S3 bucket: %s", bucket)
 
@@ -221,6 +211,7 @@ def run_silver(run_config: SilverRunConfig) -> tuple[dict[str, str | None], dict
     references: dict[str, pd.DataFrame] = {}
     results: dict[str, str | None] = {}
     record_counts: dict[str, int] = {}
+    quarantine_counts: dict[str, int] = {}
 
     for entity_name in processing_order:
         entity_config = entity_configs[entity_name]
@@ -236,7 +227,15 @@ def run_silver(run_config: SilverRunConfig) -> tuple[dict[str, str | None], dict
             partition_col=partition_col,
         )
 
-        silver_df = _transform_entity(entity_name, bronze_df, references)
+        silver_df, quality = _transform_entity(entity_name, bronze_df, references)
+
+        if not quality.quarantine_df.empty:
+            quarantine_writer.write_entity(
+                quality.quarantine_df,
+                entity_config=entity_config,
+                batch_id=batch_id,
+            )
+        quarantine_counts[entity_name] = quality.quarantine_count
 
         if entity_name in ("uf", "municipio"):
             references[entity_name] = silver_df
@@ -258,7 +257,17 @@ def run_silver(run_config: SilverRunConfig) -> tuple[dict[str, str | None], dict
         )
 
     logger.info("=== SILVER PROCESSING COMPLETED ===")
-    return results, record_counts
+
+    environment = os.getenv("ENVIRONMENT", "dev")
+    publish_quality_metrics(
+        batch_id=batch_id,
+        environment=environment,
+        layer="silver",
+        quarantine_counts=quarantine_counts,
+        record_counts=record_counts,
+    )
+
+    return results, record_counts, quarantine_counts
 
 
 def _normalize_argv() -> None:
