@@ -110,8 +110,8 @@ acionar quality Silver + append de quarentena (se houver rejeições).
 | **A — Dev/demo** (manual ou 1–2×/dia) | 30 runs | 3–7 min | ~US$ 0,15–0,45 | **~US$ 5–14** |
 | **B — Quase tempo real** (a cada 5 min, 12h/dia) | ~4.000 runs* | 1–3 min (backlog pequeno) | ~US$ 0,05–0,15 | **~US$ 200–600** |
 | **C — Contínuo clássico (anti-padrão)** | cluster 24×7 | idle + compute | — | **US$ 800–2.000+** |
-| Kafka broker (EC2 t3.small, se self-managed) | 730 h | — | ~US$ 0,02/h | **~US$ 15** |
-| MSK Serverless (se migrar) | ingress/egress | — | variável | **~US$ 20–80** |
+| Kafka broker (EC2 t3.small, se self-managed) | 730 h | — | ~US$ 0,0208/h | **~US$ 15** (+ EBS/ops) |
+| MSK Serverless (se migrar) | cluster ligado o mês todo | — | ~US$ 0,75/cluster-h + GB | **~US$ 550+** (piso) |
 | DLQ Bronze persistido no S3 *(não adotado)* | — | — | — | evitado pelo modo lean |
 
 \*Muitos runs curtos: o custo sobe por *overhead* de start de job. Para o challenge, o **cenário A** (ou schedule a cada 30–60 min) é o sweet spot FinOps.
