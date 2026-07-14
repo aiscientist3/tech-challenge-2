@@ -102,7 +102,8 @@ Ordem recomendada: **Bronze batch → Silver batch → Gold batch**. Streaming d
 
 Visão dos jobs no workspace (batch agendado + streaming sob demanda):
 
-![Jobs no Databricks](./assets/databricks.png)
+<img width="1704" height="345" alt="image" src="https://github.com/user-attachments/assets/fe199f96-ec6a-4f45-9da7-e8275ac37cda" />
+
 
 | Job | Papel |
 |---|---|
