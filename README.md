@@ -97,6 +97,22 @@ flowchart TD
 
 Ordem recomendada: **Bronze batch → Silver batch → Gold batch**. Streaming de `alunos` pode rodar em paralelo após o broker Kafka estar disponível.
 
+
+### Jobs no Databricks
+
+Visão dos jobs no workspace (batch agendado + streaming sob demanda):
+
+<img width="1704" height="345" alt="image" src="https://github.com/user-attachments/assets/fe199f96-ec6a-4f45-9da7-e8275ac37cda" />
+
+
+| Job | Papel |
+|---|---|
+| `bronze_batch_ingestion` | BigQuery → Bronze (UF, município, metas) — schedule diário |
+| `silver_batch_ingestion` | Bronze → Silver (metas / território) — schedule diário |
+| `bronze_streaming_ingestion` | Kafka → Bronze **e** Silver de `alunos` (mesmo run) |
+| `gold_batch_indicators` | Silver → indicadores Gold |
+| `silver_streaming_ingestion` | Opcional / Automática ao fim da ingestão streaming bronze |
+
 ---
 
 ## Stack Tecnológica
