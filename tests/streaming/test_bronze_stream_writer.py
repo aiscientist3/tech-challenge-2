@@ -21,7 +21,16 @@ class TestBuildMergePredicate:
 
 
 class TestBuildMatchedUpdateSet:
-    def test_excludes_merge_keys_and_batch_id(self):
+    def test_excludes_merge_keys(self):
+        updates = build_matched_update_set(
+            ["ano", "id_aluno", "proficiencia", "_event_id"],
+            merge_keys=("ano", "id_aluno"),
+            preserve_columns=(),
+        )
+
+        assert set(updates) == {"proficiencia", "_event_id"}
+
+    def test_preserve_columns_skipped_when_configured(self):
         updates = build_matched_update_set(
             ["ano", "id_aluno", "proficiencia", "_batch_id", "_event_id"],
             merge_keys=("ano", "id_aluno"),

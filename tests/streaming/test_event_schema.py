@@ -16,12 +16,14 @@ class TestEventSchema:
         assert "event_id" in event
         assert event["event_type"] == "performance_measurement"
         assert "event_timestamp" in event
-        assert event["ano"] == 2024
+        assert "ano" not in event  # business fields only inside payload
+        assert json.loads(event["payload"])["ano"] == 2024
         assert json.loads(event["payload"])["sigla_uf"] == "SP"
 
-    def test_build_event_envelope_infers_ano_from_row(self):
-        event = build_event_envelope({"ano": 2023, "id_municipio": "3550308"})
-        assert event["ano"] == 2023
+    def test_build_event_envelope_fills_ano_into_payload_when_passed(self):
+        event = build_event_envelope({"id_municipio": "3550308"}, ano=2023)
+        assert "ano" not in event
+        assert json.loads(event["payload"])["ano"] == 2023
 
     def test_serialize_event_returns_valid_json_bytes(self):
         event = build_event_envelope({"ano": 2024})
@@ -29,3 +31,4 @@ class TestEventSchema:
         parsed = json.loads(raw.decode("utf-8"))
         assert parsed["event_id"] == event["event_id"]
         assert parsed["event_type"] == "performance_measurement"
+        assert "ano" not in parsed

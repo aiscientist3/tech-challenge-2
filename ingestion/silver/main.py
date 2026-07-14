@@ -36,6 +36,7 @@ from ingestion.silver.silver_writer import SilverWriter
 from ingestion.silver.transforms import (
     apply_enrichment,
     deduplicate,
+    project_alunos_for_silver,
     standardize_common,
 )
 
@@ -186,6 +187,8 @@ def _transform_entity(
     treated = standardize_common(df)
     treated = deduplicate(treated, entity_config.natural_key, entity_name=entity_name)
     treated = apply_enrichment(entity_name, treated, references)
+    if entity_name == "alunos":
+        treated = project_alunos_for_silver(treated)
     quality = validate_entity(treated, entity_name, references)
     return quality.valid_df, quality
 

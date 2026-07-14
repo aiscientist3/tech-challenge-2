@@ -69,6 +69,9 @@ def expand_kafka_microbatch(
     """
     Parse Kafka rows into valid Bronze records or rejected events.
 
+    Envelope contract: event_id, event_type, event_timestamp, payload (business
+    row JSON). Business fields such as ``ano`` live only inside ``payload``.
+
     Malformed envelopes, invalid JSON payloads and missing natural keys are
     counted in ``dlq_records`` (log only — not persisted to S3).
     """
@@ -146,7 +149,6 @@ def expand_kafka_microbatch(
         event_id = envelope.get("event_id")
         event_type = envelope.get("event_type")
         event_timestamp = envelope.get("event_timestamp")
-        envelope_ano = envelope.get("ano")
         payload_raw = envelope.get("payload")
 
         if not event_id or payload_raw is None:
@@ -159,7 +161,6 @@ def expand_kafka_microbatch(
                     event_id=str(event_id) if event_id else None,
                     event_type=event_type,
                     event_timestamp=event_timestamp,
-                    ano=int(envelope_ano) if envelope_ano is not None else None,
                     kafka_topic=topic,
                     kafka_partition=partition,
                     kafka_offset=offset,
@@ -179,7 +180,6 @@ def expand_kafka_microbatch(
                     event_id=str(event_id),
                     event_type=event_type,
                     event_timestamp=event_timestamp,
-                    ano=int(envelope_ano) if envelope_ano is not None else None,
                     kafka_topic=topic,
                     kafka_partition=partition,
                     kafka_offset=offset,
@@ -197,7 +197,6 @@ def expand_kafka_microbatch(
                     event_id=str(event_id),
                     event_type=event_type,
                     event_timestamp=event_timestamp,
-                    ano=int(envelope_ano) if envelope_ano is not None else None,
                     kafka_topic=topic,
                     kafka_partition=partition,
                     kafka_offset=offset,
@@ -205,8 +204,9 @@ def expand_kafka_microbatch(
             )
             continue
 
-        if record.get("ano") is None and envelope_ano is not None:
-            record["ano"] = int(envelope_ano)
+        # Backward compatibility: older producers may still send top-level ano.
+        if record.get("ano") is None and envelope.get("ano") is not None:
+            record["ano"] = int(envelope["ano"])
 
         if not record_has_natural_keys(record, natural_keys):
             result.dlq_records.append(
@@ -226,16 +226,12 @@ def expand_kafka_microbatch(
             )
             continue
 
+        # Expand payload once. Lean Bronze audit only — constants (mode/sink/source/
+        # event_type/topic) live in catalog; keep id + kafka position for replay.
         record["_event_id"] = event_id
-        record["_event_type"] = event_type
-        record["_event_timestamp"] = event_timestamp
-        record["_kafka_topic"] = topic
         record["_kafka_partition"] = partition
         record["_kafka_offset"] = offset
         record["_ingestion_timestamp"] = resolved_ts
-        record["_ingestion_mode"] = "stream"
-        record["_stream_sink"] = "kafka"
-        record["_source_table"] = source_table
         result.records.append(record)
 
     if result.dlq_records:

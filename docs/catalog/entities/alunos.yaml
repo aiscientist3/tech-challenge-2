@@ -49,13 +49,25 @@ destino:
     tipo: hive_style
   caminho_relativo: bronze/br_inep_alfabetizacao/alunos/
   caminho_exemplo: s3://{bucket}/bronze/br_inep_alfabetizacao/alunos/ano=2024/
+  silver:
+    caminho_relativo: silver/br_inep_alfabetizacao/alunos/
+    projecao: >
+      Silver materializa apenas colunas de negócio para qualidade/Gold
+      (ano, id_aluno, id_municipio, rede, alfabetizado, proficiencia, peso_aluno)
+      + auditoria mínima (_ingestion_timestamp, _silver_*).
+      Linhagem Kafka/evento permanece só na Bronze.
 
 ingestao:
-  pipeline: ingestion/batch/main.py
-  source_code: ingestion/batch/sources/alunos.py
+  pipeline: ingestion/streaming/kafka/main.py
+  producer: ingestion/streaming/producer/alunos_simulator.py
+  source_code: ingestion/streaming/
   filtro_ano: true
-  modo_escrita: overwrite
+  modo_escrita: merge_upsert
+  chave_merge: [ano, id_aluno]
   colunas_origem: SELECT *
+  observacao: >
+    Alunos NÃO entram no batch registry. Fluxo: BigQuery → producer Kafka →
+    consumer Databricks (Bronze MERGE → Silver MERGE com projeção de colunas).
 
 chaves:
   candidata_negocio:
@@ -87,6 +99,7 @@ colunas:
     descricao: Máscara do código da escola (códigos fictícios)
     chave: false
     pii: false
+    camada: bronze_only
 
   - nome: id_aluno
     tipo: STRING
@@ -101,6 +114,7 @@ colunas:
     descricao: Código do caderno atribuído ao aluno na prova de língua portuguesa
     chave: false
     pii: false
+    camada: bronze_only
 
   - nome: serie
     tipo: STRING
@@ -108,6 +122,7 @@ colunas:
     descricao: Ano escolar
     chave: false
     pii: false
+    camada: bronze_only
 
   - nome: rede
     tipo: STRING
@@ -122,6 +137,7 @@ colunas:
     descricao: Indicador de presença na prova de língua portuguesa
     chave: false
     pii: false
+    camada: bronze_only
 
   - nome: preenchimento_caderno
     tipo: STRING
@@ -129,6 +145,7 @@ colunas:
     descricao: Indicador de preenchimento da prova de língua portuguesa
     chave: false
     pii: false
+    camada: bronze_only
 
   - nome: alfabetizado
     tipo: STRING
@@ -162,14 +179,32 @@ colunas_tecnicas_ingestao:
     tipo: STRING
     descricao: Data/hora UTC da ingestão (ISO 8601)
     origem: pipeline
-  - nome: _source_table
+    camada: bronze_e_silver
+  - nome: _event_id
     tipo: STRING
-    descricao: Tabela de origem no BigQuery
+    descricao: ID do evento no envelope Kafka
     origem: pipeline
-  - nome: _batch_id
+    camada: bronze_only
+  - nome: _kafka_partition
+    tipo: INTEGER
+    descricao: Partição Kafka (replay/debug)
+    origem: pipeline
+    camada: bronze_only
+  - nome: _kafka_offset
+    tipo: INTEGER
+    descricao: Offset Kafka (replay/debug)
+    origem: pipeline
+    camada: bronze_only
+  - nome: _silver_processed_at
     tipo: STRING
-    descricao: UUID único do lote de ingestão
+    descricao: Timestamp do processamento Silver
     origem: pipeline
+    camada: silver_only
+  - nome: _silver_stream_batch_id
+    tipo: STRING
+    descricao: ID do micro-batch streaming
+    origem: pipeline
+    camada: silver_only
 
 qualidade:
   regras:
@@ -195,11 +230,13 @@ qualidade:
 lineage:
   upstream:
     - basedosdados.br_inep_avaliacao_alfabetizacao.alunos
-  downstream_planejado:
+    - kafka.br-inep-alfabetizacao.alunos.performance
+  downstream:
     - silver.alunos
-    - gold.indicador_crianca_alfabetizada
+    - gold.indicador_crianca_alfabetizada_municipio
+    - gold.indicador_crianca_alfabetizada_uf
 
 contrato_dados:
-  frequencia_carga: conforme agendamento Databricks Job
+  frequencia_carga: job streaming Databricks (AvailableNow) + producer sob demanda
   anos_suportados: [2023, 2024]
   sla_freshness: a_definir

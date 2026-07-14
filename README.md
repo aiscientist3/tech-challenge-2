@@ -1,6 +1,45 @@
 # Pipeline Híbrido — Análise da Alfabetização no Brasil
 
-Tech Challenge Fase 2 — Pipeline de dados híbrida (Batch + Streaming) com Arquitetura Medalhão, integrando fontes educacionais da [Base dos Dados](https://basedosdados.org) para análise do programa Compromisso Nacional Criança Alfabetizada.
+Tech Challenge Fase 2 — pipeline de dados **híbrida (Batch + Streaming)** com **Arquitetura Medalhão** (Bronze → Silver → Gold), integrando fontes da [Base dos Dados](https://basedosdados.org) para análise do **Compromisso Nacional Criança Alfabetizada**.
+
+Documentação complementar:
+
+| Documento | Conteúdo |
+|---|---|
+| [`docs/qualidade-dados.md`](docs/qualidade-dados.md) | Regras, quarentena e operação da qualidade |
+| [`docs/finops-estimativa-custos.md`](docs/finops-estimativa-custos.md) | Estimativa teórica de custos |
+| [`docs/README.md`](docs/README.md) | Catálogo / governança de dados |
+| [`terraform/README.md`](terraform/README.md) | Provisionamento AWS + Databricks |
+
+---
+
+## Contexto do problema
+
+A alfabetização na infância é pilar do desenvolvimento educacional e socioeconômico. O **Compromisso Nacional Criança Alfabetizada** articula União, estados, DF e municípios para que todas as crianças estejam alfabetizadas ao final do 2º ano do ensino fundamental.
+
+A partir da Pesquisa Alfabetiza Brasil (INEP, 2023), foi definido o ponto de corte de **743 pontos** na escala Saeb — nível a partir do qual a criança é considerada alfabetizada. O **Indicador Criança Alfabetizada** expressa o percentual de estudantes que atingem esse patamar. A meta nacional é que, até **2030**, todas as crianças brasileiras estejam alfabetizadas nesse marco.
+
+Compreender o fenômeno exige integrar:
+
+- Metas nacionais, estaduais e municipais
+- Dados territoriais (UF / município)
+- Microdados educacionais (alunos)
+- Indicadores de desempenho / gaps vs metas
+
+Este projeto constrói uma pipeline em nuvem capaz de ingerir, tratar, validar e publicar essas bases de forma rastreável, escalável e com controle de custos.
+
+---
+
+## Objetivo técnico
+
+Construir uma pipeline escalável em nuvem que realize:
+
+1. Ingestão de fontes educacionais (Base dos Dados / BigQuery)
+2. Tratamento, padronização e integração entre bases
+3. Camada analítica confiável (Indicador Criança Alfabetizada + gaps)
+4. Qualidade com quarentena e métricas
+5. Monitoramento operacional
+6. Práticas de FinOps documentadas e aplicadas na arquitetura
 
 ---
 
@@ -10,50 +49,71 @@ Tech Challenge Fase 2 — Pipeline de dados híbrida (Batch + Streaming) com Arq
 flowchart TD
     subgraph fontes [Fontes de Dados]
         BQ["Google BigQuery\n(Base dos Dados)"]
-        MSK["Amazon MSK\n(Kafka)"]
+        Kafka["Apache Kafka\n(EC2 — broker :9092)"]
     end
 
     subgraph ingestao [Ingestão]
-        Batch["Databricks Job\nPython .py — Batch"]
-        Stream["Spark Structured Streaming\nDatabricks — Streaming"]
+        Batch["Databricks Job\nBatch Python"]
+        Producer["Producer Python\nalunos_simulator"]
+        Stream["Databricks Job\nStructured Streaming\nAvailableNow"]
     end
 
     subgraph medalhao [Arquitetura Medalhão — S3 + Delta Lake]
         Bronze["Bronze\ndados brutos"]
-        Silver["Silver\ndados tratados"]
+        Silver["Silver\ndados tratados + qualidade"]
         Gold["Gold\nindicadores analíticos"]
+        Quar["Quarentena\nlinhas inválidas"]
     end
 
     subgraph ops [Operações]
         Monitor["CloudWatch +\nDatabricks Alerts"]
-        Quality["Great Expectations /\ndbt tests"]
+        Quality["Validadores pandas\n+ catálogo YAML"]
+        FinOps["FinOps\nServerless + Lifecycle S3"]
     end
 
     BQ --> Batch --> Bronze
-    MSK --> Stream --> Bronze
+    BQ --> Producer --> Kafka --> Stream
+    Stream --> Bronze
+    Stream --> Silver
     Bronze --> Silver --> Gold
-    Batch --> Monitor
-    Stream --> Monitor
+    Silver --> Quar
+    Gold --> Quar
     Silver --> Quality
     Gold --> Quality
+    Batch --> Monitor
+    Stream --> Monitor
+    Batch --> FinOps
+    Stream --> FinOps
 ```
+
+### Fluxo de dados
+
+| Etapa | Origem | Destino | Modo |
+|---|---|---|---|
+| Bronze batch | BigQuery (UF, município, metas) | `s3://…/bronze/…` | Job periódico |
+| Streaming alunos | BigQuery → Producer → Kafka | Bronze MERGE → Silver MERGE | Micro-batch `AvailableNow` |
+| Silver batch | Bronze Delta | `s3://…/silver/…` (+ quarentena) | Job após Bronze |
+| Gold batch | Silver (`alunos` + metas) | `s3://…/gold/…` (+ quarentena) | Job após Silver |
+
+Ordem recomendada: **Bronze batch → Silver batch → Gold batch**. Streaming de `alunos` pode rodar em paralelo após o broker Kafka estar disponível.
 
 ---
 
 ## Stack Tecnológica
 
-| Camada | Tecnologia |
-|---|---|
-| Fonte de dados | Google BigQuery (Base dos Dados) |
-| Ingestão Batch | Databricks Jobs (Python `.py`) |
-| Ingestão Streaming | Amazon MSK (Kafka) + Spark Structured Streaming |
-| Storage | AWS S3 + Delta Lake |
-| Orquestração | Databricks Workflows |
-| Credenciais GCP | Databricks Secret Scope |
-| Credenciais AWS | Databricks Secret Scope (Serverless) + IAM Instance Profile (cluster clássico) |
-| Qualidade de dados | Great Expectations / dbt tests *(pendente)* |
-| Monitoramento | CloudWatch + Databricks email alerts |
-| IaC | Terraform |
+| Camada | Tecnologia | Status |
+|---|---|---|
+| Fonte de dados | Google BigQuery (Base dos Dados) | Implementado |
+| Ingestão Batch | Databricks Jobs (Python `.py`) | Implementado |
+| Ingestão Streaming | Apache Kafka (EC2) + Spark Structured Streaming (Databricks) | Implementado |
+| Storage | AWS S3 + Delta Lake (Parquet/Snappy) | Implementado |
+| Orquestração | Databricks Workflows (jobs por camada) | Implementado |
+| Credenciais GCP | Databricks Secret Scope `gcp` | Implementado |
+| Credenciais AWS / Kafka | Databricks Secret Scope `aws` (+ Instance Profile para clusters clássicos) | Implementado |
+| Qualidade de dados | Validadores pandas + catálogo YAML + quarentena Delta | Implementado |
+| Monitoramento | CloudWatch metrics/alarms/dashboard + SNS + e-mail Databricks | Implementado |
+| IaC | Terraform (S3, IAM, jobs, monitoring) | Implementado |
+| Broker Kafka gerenciado (MSK) | — | Não provisionado (lab em EC2) |
 
 ---
 
@@ -62,90 +122,183 @@ flowchart TD
 ```
 tech-challenge-2/
 ├── ingestion/
-│   └── batch/                      ← Ingestão batch (implementado)
-│       ├── config.py               ← Parâmetros centralizados
-│       ├── connections/
-│       │   ├── bigquery_client.py  ← Cliente GCP via Databricks Secrets
-│       │   └── spark_s3.py         ← SparkSession com IAM Instance Profile
-│       ├── sources/
-│       │   ├── base_source.py      ← Classe abstrata + retry
-│       │   ├── uf.py
-│       │   ├── municipio.py
-│       │   ├── meta_brasil.py
-│       │   ├── meta_uf.py
-│       │   ├── meta_municipio.py
-│       │   └── alunos.py
-│       ├── bronze_writer.py        ← Gravação Delta Lake no S3
-│       └── main.py                 ← Entry point do Databricks Job
+│   ├── batch/                      ← Bronze batch (BigQuery → S3)
+│   │   ├── main.py
+│   │   ├── bronze_writer.py
+│   │   ├── metrics.py
+│   │   ├── connections/            ← BigQuery, AWS, Spark S3
+│   │   └── sources/                ← uf, municipio, meta_*
+│   ├── silver/                     ← Bronze → Silver (+ qualidade)
+│   │   ├── main.py
+│   │   ├── transforms.py
+│   │   ├── quality.py
+│   │   ├── quarantine_writer.py
+│   │   └── …
+│   ├── gold/                       ← Silver → indicadores Gold
+│   │   ├── main.py
+│   │   ├── transforms.py
+│   │   ├── quality.py
+│   │   └── …
+│   ├── streaming/                  ← Kafka → Bronze → Silver (alunos)
+│   │   ├── producer/alunos_simulator.py
+│   │   ├── kafka/main.py
+│   │   ├── bronze_stream_writer.py
+│   │   ├── silver_stream_writer.py
+│   │   └── …
+│   ├── common/                     ← dbutils, helpers de qualidade
+│   └── delta_read.py               ← leitura Delta (incl. Serverless)
 ├── tests/
-│   └── batch/
-│       ├── conftest.py
-│       └── test_sources.py
-├── terraform/                      ← IaC AWS + Databricks Job
-│   ├── README.md
-│   ├── main.tf
-│   ├── modules/
-│   │   ├── s3_datalake/
-│   │   ├── iam_databricks/
-│   │   └── databricks_job/
-│   └── terraform.tfvars.example
+│   ├── batch/
+│   ├── silver/
+│   ├── gold/
+│   └── streaming/
+├── docs/
+│   ├── qualidade-dados.md
+│   ├── finops-estimativa-custos.md
+│   └── catalog/                    ← contratos YAML das entidades
+├── terraform/                      ← S3, IAM, jobs Databricks, monitoring
+├── databricks/                     ← job_config.example.json
+├── scripts/                        ← utilitários de micro-batch / testes
 ├── requirements.txt
 └── README.md
 ```
 
 ---
 
-## Camada Bronze — Ingestão Batch (Implementado)
+## Fontes de Dados
 
-### Fontes integradas
+### Batch (Bronze) — registry em `ingestion/batch/sources`
 
 | Fonte | Tabela BigQuery | Destino S3 |
 |---|---|---|
 | UF | `basedosdados.br_bd_diretorios_brasil.uf` | `bronze/.../uf/` |
 | Município | `basedosdados.br_bd_diretorios_brasil.municipio` | `bronze/.../municipio/` |
-| Meta Brasil | `basedosdados.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_brasil` | `bronze/.../meta_brasil/ano=XXXX/` |
-| Meta UF | `basedosdados.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_uf` | `bronze/.../meta_uf/ano=XXXX/` |
-| Meta Município | `basedosdados.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_municipio` | `bronze/.../meta_municipio/ano=XXXX/` |
-| Alunos | `basedosdados.br_inep_avaliacao_alfabetizacao.alunos` | `bronze/.../alunos/ano=XXXX/` |
+| Meta Brasil | `...meta_alfabetizacao_brasil` | `bronze/.../meta_brasil/ano=…/` |
+| Meta UF | `...meta_alfabetizacao_uf` | `bronze/.../meta_uf/ano=…/` |
+| Meta Município | `...meta_alfabetizacao_municipio` | `bronze/.../meta_municipio/ano=…/` |
 
-### Metadados adicionados em cada registro
+### Streaming — microdados de alunos
+
+| Fonte | Origem | Destino |
+|---|---|---|
+| Alunos | BigQuery `...alunos` → producer Kafka → consumer Databricks | `bronze/.../alunos/` e `silver/.../alunos/` (MERGE) |
+
+> **Decisão:** `alunos` **não** entra no batch registry. A chegada contínua é simulada via Kafka; metas e diretórios permanecem batch (volume baixo, atualização esporádica).
+
+### Metadados de auditoria (Bronze batch)
 
 | Coluna | Descrição |
 |---|---|
 | `_ingestion_timestamp` | Data/hora UTC da ingestão (ISO 8601) |
 | `_source_table` | Tabela de origem no BigQuery |
-| `_batch_id` | UUID único do lote de ingestão |
+| `_batch_id` | UUID do lote de ingestão |
 
-### Layout S3 (Bronze)
+### Layout S3 (Medalhão)
 
 ```
-s3://tech-challenge-2-datalake/
-└── bronze/
-    └── br_inep_alfabetizacao/
-        ├── uf/
-        ├── municipio/
-        ├── meta_brasil/
-        │   ├── ano=2023/
-        │   └── ano=2024/
-        ├── meta_uf/
-        │   ├── ano=2023/
-        │   └── ano=2024/
-        ├── meta_municipio/
-        │   ├── ano=2023/
-        │   └── ano=2024/
-        └── alunos/
-            ├── ano=2023/
-            └── ano=2024/
+s3://<bucket>/
+├── bronze/br_inep_alfabetizacao/{uf,municipio,meta_*,alunos}/
+├── silver/br_inep_alfabetizacao/{uf,municipio,meta_*,alunos}/
+├── gold/br_inep_alfabetizacao/
+│   ├── indicador_crianca_alfabetizada_municipio/
+│   └── indicador_crianca_alfabetizada_uf/
+└── quarantine/br_inep_alfabetizacao/{silver|gold}/{entity}/
 ```
+
+---
+
+## Camadas Medalhão
+
+### Bronze — raw
+
+- Dados brutos das fontes, sem transformações de negócio
+- Batch: overwrite/append Delta + validação mínima de schema
+- Streaming: MERGE por chave natural `(ano, id_aluno)`
+- Histórico preservado; lifecycle S3: `bronze/` → **STANDARD_IA após 90 dias**
+
+### Silver — tratados
+
+- Padronização (`standardize_common`)
+- Deduplicação por chave natural
+- Enriquecimento territorial: `meta_uf ⋊ uf`, `meta_municipio ⋊ municipio`
+- Gate de qualidade (completude, domínio, FK) → válidos na Silver / inválidos na quarentena
+- **`alunos` (streaming):** projeção FinOps — Silver guarda só colunas de negócio/quality/Gold; linhagem Kafka (`_kafka_*`, `_event_*`) permanece **apenas na Bronze**
+
+Entidades: `uf`, `municipio`, `meta_brasil`, `meta_uf`, `meta_municipio`, `alunos`.
+
+### Gold — analítica
+
+Datasets:
+
+| Dataset | Conteúdo |
+|---|---|
+| `indicador_crianca_alfabetizada_municipio` | Taxa ponderada por município/rede + gaps |
+| `indicador_crianca_alfabetizada_uf` | Taxa ponderada por UF/rede + gaps |
+
+Inclui comparação com taxas INEP e **metas 2024–2030** (`gap_meta_YYYY`). Preparado para BI, análises e modelos (ver seção [Aplicação em IA](#aplicação-em-ia)).
+
+---
+
+## Qualidade de Dados
+
+Engine própria (pandas + regras do catálogo YAML) — **sem** Great Expectations/dbt, para manter o stack enxuto e alinhado ao código existente.
+
+| Camada | Comportamento |
+|---|---|
+| Bronze | Raw; schema mínimo no batch; DLQ lean (log) no streaming |
+| Silver | Completude, domínio, referencial; quarentena Delta |
+| Gold | Faixa 0–100, FK territorial; meta ausente = warning |
+
+Detalhes operacionais: [`docs/qualidade-dados.md`](docs/qualidade-dados.md).
+
+---
+
+## Monitoramento
+
+| Componente | O que cobre |
+|---|---|
+| CloudWatch custom metrics | Registros, duração, falhas, `quality_*` |
+| Alarmes + SNS | Falha, duração, zero registros, S3 5xx |
+| Dashboard CloudWatch | Visão consolidada do batch |
+| Databricks job e-mail | Falha (e opcionalmente sucesso / duração) |
+
+Setup: [`terraform/README.md`](terraform/README.md#monitoring).
+
+---
+
+## Decisões Arquiteturais (trade-offs)
+
+| Decisão | Escolha | Alternativa | Motivo |
+|---|---|---|---|
+| Ingestão de `alunos` | Streaming (Kafka + micro-batch) | Batch único | Simula chegada contínua exigida pelo desafio; metas ficam batch |
+| Lake | S3 + Delta Lake | Data warehouse (Redshift/BQ DW) | Custo baixo de storage, ACID no lake, flexibilidade medalhão |
+| Compute | Databricks Serverless Jobs | Cluster clássico 24×7 | Sem idle DBU; timeout por job |
+| Broker | Kafka em EC2 | Amazon MSK | Lab acadêmico: menor custo fixo; MSK fica como evolução |
+| Qualidade | Validadores pandas + YAML | Great Expectations / dbt | Menos infra; regras versionadas no catálogo do repo |
+| Rejeições Bronze stream | DLQ lean (log) | Persistir payload no S3 | Evita pagar storage por lixo; Silver/Gold usam quarentena Delta |
+
+---
+
+## Aplicação em IA
+
+A camada Gold concentra features prontas para modelagem e análise avançada:
+
+| Uso | Como a Gold ajuda |
+|---|---|
+| Predição de alfabetização | Taxa observada, gaps vs metas 2024–2030, rede, território |
+| Desigualdade educacional | Comparar municípios/UFs e redes (municipal × estadual × privada) |
+| Políticas públicas | Priorizar localidades com maior `gap_meta_*` / pior tendência |
+| Clustering de vulnerabilidade | Combinar Gold com bases externas (IBGE, CadÚnico — opcional, fora do escopo atual) |
+
+O ponto de corte Saeb (**743**) e o Indicador Criança Alfabetizada são o fio condutor semântico para features e labels em estudos futuros.
 
 ---
 
 ## Configuração de Credenciais
 
-### 1. GCP — BigQuery (Databricks Secret Scope)
+### 1. GCP — BigQuery (Secret Scope `gcp`)
 
 ```bash
-# Criar Secret Scope "gcp" via Databricks CLI
 databricks secrets create-scope gcp
 databricks secrets put --scope gcp --key project-id \
     --string-value "YOUR_GCP_PROJECT_ID"
@@ -153,28 +306,16 @@ databricks secrets put --scope gcp --key service-account-json \
     --string-value "$(cat service-account.json)"
 ```
 
-Variáveis de ambiente relevantes:
+Fallback local:
 
-| Variável | Padrão | Descrição |
-|---|---|---|
-| `GCP_PROJECT_ID_SECRET_KEY` | `project-id` | Chave do Secret Scope para o project ID |
-| `DATABRICKS_SECRET_SCOPE` | `gcp` | Nome do Secret Scope |
-| `DATABRICKS_SECRET_KEY` | `service-account-json` | Chave do JSON da service account |
-
-**Fallback para desenvolvimento local:**
 ```bash
-# Opção 1 — arquivo
 export GOOGLE_APPLICATION_CREDENTIALS="/caminho/para/service-account.json"
-
-# Opção 2 — JSON inline
+# ou
 export GCP_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
+export GCP_PROJECT_ID="YOUR_GCP_PROJECT_ID"
 ```
 
-### 2. AWS — S3
-
-#### Serverless (produção atual)
-
-O batch Bronze em **Databricks Serverless** usa credenciais via **Secret Scope** (IAM User + access keys provisionados pelo Terraform):
+### 2. AWS — S3 (Secret Scope `aws`)
 
 ```bash
 databricks secrets create-scope aws
@@ -183,98 +324,88 @@ databricks secrets put --scope aws --key access-key-id --string-value "AKIA..."
 databricks secrets put --scope aws --key secret-access-key --string-value "..."
 ```
 
-Após `terraform apply`, use os comandos documentados em [`terraform/README.md`](terraform/README.md).
+Após `terraform apply`, use os outputs documentados em [`terraform/README.md`](terraform/README.md).
 
-| Secret Scope | Chave | Descrição |
-|---|---|---|
-| `aws` | `s3-bucket` | Nome do bucket S3 |
-| `aws` | `access-key-id` | Access key do IAM User |
-| `aws` | `secret-access-key` | Secret key do IAM User |
+### 3. Kafka (mesmo scope `aws`)
 
-#### Cluster clássico (Instance Profile)
-
-Para clusters clássicos ou streaming futuro, associe o **Instance Profile** criado pelo Terraform (`tech-challenge-2-<env>-databricks-s3-profile`) ao cluster Databricks. A política S3 mínima:
-
-```json
-{
-  "Effect": "Allow",
-  "Action": ["s3:PutObject", "s3:GetObject", "s3:ListBucket", "s3:DeleteObject"],
-  "Resource": [
-    "arn:aws:s3:::YOUR_BUCKET_NAME",
-    "arn:aws:s3:::YOUR_BUCKET_NAME/*"
-  ]
-}
+```bash
+databricks secrets put --scope aws --key kafka-bootstrap-servers \
+    --string-value "<EC2_PUBLIC_IP>:9092"
+databricks secrets put --scope aws --key kafka-topic \
+    --string-value "br-inep-alfabetizacao.alunos.performance"
 ```
 
-Variáveis de ambiente relevantes:
-
-| Variável | Padrão | Descrição |
-|---|---|---|
-| `S3_BUCKET` | *(via Secret Scope)* | Bucket de destino |
-| `BRONZE_PREFIX` | `bronze/br_inep_alfabetizacao` | Prefixo da camada Bronze |
-| `AWS_DEFAULT_REGION` | `us-east-1` | Região AWS |
-| `S3_ENDPOINT` | *(vazio)* | Endpoint alternativo (MinIO / LocalStack) |
+Fallback local: `KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_TOPIC`, `S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
 
 ---
 
 ## Como Executar
 
-### Instalação local (desenvolvimento)
+### Instalação local
 
 ```bash
 python -m venv .venv
+# Windows: .\.venv\Scripts\Activate.ps1
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Testes unitários
+### Testes
 
 ```bash
-pytest tests/batch/ -v
+pytest tests/ -v
 ```
 
-### Databricks Job (produção)
-
-**Task type:** Python script
-**Caminho:** `ingestion/batch/main.py`
+### Bronze (batch)
 
 ```bash
-# Ingerir todas as fontes, anos 2023 e 2024
 python -m ingestion.batch.main --sources all --years 2023,2024
-
-# Fontes específicas
 python -m ingestion.batch.main --sources uf,meta_brasil --years 2024
-
-# Modo desenvolvimento — limitar linhas por fonte
 python -m ingestion.batch.main --sources meta_municipio --years 2024 --row-limit 10000
-
-# Modo append (preserva dados existentes)
-python -m ingestion.batch.main --sources alunos --years 2024 --append
 ```
 
-### Databricks Widgets (alternativa via UI)
+### Streaming — publicar eventos (producer)
 
-| Widget | Exemplo | Descrição |
-|---|---|---|
-| `sources` | `all` | Fontes separadas por vírgula ou `all` |
-| `years` | `2023,2024` | Anos a ingerir |
-| `batch_id` | *(vazio)* | UUID gerado automaticamente se vazio |
-| `row_limit` | `10000` | Limite de linhas (vazio = sem limite) |
-| `overwrite` | `true` | `false` para modo append |
+```bash
+export KAFKA_BOOTSTRAP_SERVERS="<EC2_IP>:9092"
+export KAFKA_TOPIC="br-inep-alfabetizacao.alunos.performance"
+python -m ingestion.streaming.producer.alunos_simulator --years 2024 --row-limit 100
+```
+
+### Streaming — consumir (Databricks / local Spark)
+
+```bash
+python -m ingestion.streaming.kafka.main --starting-offsets earliest
+```
+
+### Silver (batch)
+
+```bash
+python -m ingestion.silver.main --entities all --years 2023,2024
+python -m ingestion.silver.main --entities uf,municipio --years 2023,2024
+```
+
+### Gold (batch)
+
+```bash
+python -m ingestion.gold.main --datasets all --years 2023,2024
+```
+
+Jobs equivalentes são provisionados pelo Terraform (`bronze`, `silver`, `gold`, streaming). Referência manual: [`databricks/job_config.example.json`](databricks/job_config.example.json).
 
 ---
 
-## Boas Práticas Aplicadas (Batch Bronze)
+## Boas Práticas Aplicadas
 
 - Scripts Python versionáveis (sem notebooks em produção)
-- Credenciais via Databricks Secret Scope e IAM (zero secrets hardcoded)
-- Classe base com contrato, retry exponencial e logging padronizado
-- Configuração centralizada desacoplada de código
-- Metadados de auditoria (`_ingestion_timestamp`, `_source_table`, `_batch_id`)
-- Particionamento Delta Lake por `ano` para leituras seletivas nas camadas Silver/Gold
-- Validação de schema mínimo antes da gravação
-- Testes unitários com mocks — sem dependência de serviços de nuvem
-- Parametrização via CLI e Databricks Widgets
+- Credenciais via Secret Scope / IAM (zero secrets no código)
+- Contratos e qualidade no catálogo YAML + quarentena
+- Retry exponencial e logging padronizado na ingestão batch
+- Metadados de auditoria na Bronze
+- Particionamento Delta por `ano`
+- Testes unitários por camada (`tests/batch|silver|gold|streaming`)
+- Parametrização via CLI e widgets Databricks
+- Git com branches de feature e Pull Requests na `main`
 
 ---
 
@@ -323,7 +454,7 @@ Estimativa monetária detalhada: [`docs/finops-estimativa-custos.md`](docs/finop
 
 - **Filtro na origem (BigQuery)**: `WHERE ano IN (...)` antes do transfer — reduz *bytes billed* na GCP e o volume ingressado no S3.
 - **Predicate pushdown / partition pruning**: leituras Silver/Gold devem aplicar filtros de `ano` (e `sigla_uf`) **antes** de materializar em memória, evitando carregar a tabela inteira.
-- **Column pruning**: jobs Gold selecionam apenas colunas analíticas (`taxa`, `peso_aluno`, chaves territoriais), não o payload completo de microdados.
+- **Column pruning**: jobs Gold selecionam apenas colunas analíticas; Silver `alunos` projeta o subset quality/Gold (não materializa `caderno`, `id_escola`, linhagem Kafka, etc.).
 - **Agregação na Gold**: indicadores municipais/UF são pré-calculados; o consumo analítico não precisa varrer `alunos` a cada dashboard.
 - **Dev safeguards**: `--row-limit` / `DEV_ROW_LIMIT` para experimentos sem varrer a tabela completa de alunos.
 
@@ -346,7 +477,8 @@ Estimativa monetária detalhada: [`docs/finops-estimativa-custos.md`](docs/finop
 - `maxOffsetsPerTrigger` limita o tamanho do micro-batch (controle de memória/DBU).
 - Checkpoints evitam reprocessar offsets já commitados (custo + consistência).
 - Eventos Kafka inválidos: **DLQ lean (log only)** — sem escrita S3 de payload rejeitado.
-- Silver streaming: só faz MERGE das linhas válidas; inválidas vão para quarentena (mesmo prefixo batch).
+- Silver streaming: só faz MERGE das linhas válidas (com **column pruning**); inválidas vão para quarentena (mesmo prefixo batch).
+- Envelope Kafka sem `ano` duplicado no topo — campos de negócio ficam só no `payload`.
 
 #### Escolha batch vs streaming (custo)
 
@@ -381,49 +513,27 @@ Estimativa monetária detalhada: [`docs/finops-estimativa-custos.md`](docs/finop
 
 ---
 
-## TODO — Próximas Entregas
+## Status da Entrega e Evoluções Futuras
 
-### Silver — Transformações e Joins
-- [ ] Padronizar schemas entre fontes (tipos, nomes de colunas)
-- [ ] Deduplicar registros por chave natural
-- [ ] Join `meta_municipio` + `municipio` (enriquecer com dados territoriais)
-- [ ] Join `meta_uf` + `uf`
-- [ ] Gravar camada Silver em `s3://.../silver/`
+### Implementado
 
-### Gold — Indicadores Analíticos
-- [ ] Calcular Indicador Criança Alfabetizada por UF e município
-- [ ] Comparar resultados vs. metas (gap analysis)
-- [ ] Séries temporais de evolução (2023–2030)
-- [ ] Tabelas prontas para BI/dashboard
+- [x] Bronze batch (UF, município, metas)
+- [x] Silver batch (padronização, dedup, joins, qualidade, quarentena)
+- [x] Gold (indicadores município/UF + gap vs metas 2024–2030)
+- [x] Streaming `alunos` (producer + Kafka EC2 + consumer Bronze→Silver)
+- [x] Qualidade YAML + métricas CloudWatch
+- [x] Monitoramento (alarms, SNS, Databricks e-mail)
+- [x] Terraform (S3, IAM, jobs, monitoring) + FinOps documentado
 
-### Streaming — Kafka + Spark Structured Streaming
-- [ ] Provisionar Amazon MSK
-- [ ] Producer Python simulando chegada de microdados de alunos
-- [ ] Consumer Spark Structured Streaming no Databricks
-- [ ] Persistência de eventos na camada Bronze/Silver
+### Evoluções opcionais / backlog
 
-### Qualidade de Dados
-- [x] Validação Silver/Gold orientada ao catálogo YAML (completude, domínio, referencial, faixa)
-- [x] Quarentena Delta em S3 (`quarantine/...`) + métricas CloudWatch de pass rate
-- [x] DLQ lean no Bronze streaming (eventos malformados em log, sem persistir no S3)
+- [ ] Amazon MSK (substituir broker EC2)
 - [ ] Alertas CloudWatch dedicados a `quality_pass_rate` / pico de quarentena
-- [ ] Lifecycle/expiração do prefixo `quarantine/` (FinOps)
-
-### Monitoramento
-- [x] Métricas de execução por job (registros, duração, falhas) — CloudWatch custom metrics + dashboard
-- [x] Métricas de qualidade (`quality_quarantine_rows`, `quality_pass_rate`) por camada/entidade
-- [x] CloudWatch Alarms — falha, duração, zero registros, S3 5xx
-- [x] Databricks job alerts (e-mail)
-
-Ver [`terraform/README.md`](terraform/README.md#monitoring) para configurar `alert_email` e confirmar a subscrição SNS.
-
-### IaC — Terraform
-- [x] Bucket S3 + lifecycle policies
-- [x] IAM roles e Instance Profile
-- [x] Definições de Databricks Workflows
-- [ ] Amazon MSK cluster
-
-Ver [`terraform/README.md`](terraform/README.md) para aplicar a infraestrutura.
+- [ ] Lifecycle/expiração do prefixo `quarantine/`
+- [ ] Enriquecimento externo (IBGE, CadÚnico, Censo Escolar) — opcional no PDF
+- [ ] Dashboard BI sobre a Gold
+- [ ] Workflow Databricks multi-task (Bronze → Silver → Gold encadeado)
+- [ ] Vídeo executivo (até 5 min) — entrega do PDF, fora do repositório
 
 ---
 
@@ -435,3 +545,4 @@ Ver [`terraform/README.md`](terraform/README.md) para aplicar a infraestrutura.
 - [Delta Lake Documentation](https://docs.delta.io)
 - [Databricks Secrets Guide](https://docs.databricks.com/en/security/secrets/index.html)
 - [Estimativa de Custo Teórica (FinOps)](docs/finops-estimativa-custos.md)
+- [Qualidade de Dados](docs/qualidade-dados.md)

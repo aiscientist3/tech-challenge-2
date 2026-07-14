@@ -20,10 +20,46 @@ ALUNOS_BQ_TABLE: str = (
 DEFAULT_STREAM_SOURCE: str = "alunos"
 ALUNOS_NATURAL_KEYS: tuple[str, ...] = ("ano", "id_aluno")
 ALUNOS_BRONZE_PARTITION_BY: str = "ano"
-# Legacy batch loads may still have _batch_id; stream never writes it on merge.
-ALUNOS_BRONZE_PRESERVE_COLUMNS: tuple[str, ...] = ("_batch_id",)
+# Streaming MERGE does not preserve batch-era columns.
+ALUNOS_BRONZE_PRESERVE_COLUMNS: tuple[str, ...] = ()
 ALUNOS_SILVER_PARTITION_BY: str = "ano"
 EVENT_TYPE_PERFORMANCE: str = "performance_measurement"
+
+# Minimal Bronze stream audit (constants like mode/sink/source live in catalog/docs).
+ALUNOS_BRONZE_STREAM_AUDIT_COLUMNS: tuple[str, ...] = (
+    "_event_id",
+    "_kafka_partition",
+    "_kafka_offset",
+    "_ingestion_timestamp",
+)
+
+# Silver column pruning — quality + Gold keys/metrics (+ minimal audit).
+ALUNOS_SILVER_BUSINESS_COLUMNS: tuple[str, ...] = (
+    "ano",
+    "id_aluno",
+    "id_municipio",
+    "rede",
+    "alfabetizado",
+    "proficiencia",
+    "peso_aluno",
+)
+ALUNOS_SILVER_AUDIT_COLUMNS: tuple[str, ...] = (
+    "_ingestion_timestamp",
+)
+# Dropped when promoting Bronze → Silver (kept only on Bronze / Kafka lineage).
+ALUNOS_SILVER_DROP_PREFIXES: tuple[str, ...] = (
+    "_kafka_",
+    "_event_",
+)
+ALUNOS_SILVER_DROP_COLUMNS: tuple[str, ...] = (
+    "_stream_sink",
+    "_ingestion_mode",
+    "_source_table",
+    "_batch_id",
+    "_event_type",
+    "_event_timestamp",
+    "_kafka_topic",
+)
 
 PRODUCER_MAX_RETRIES: int = int(os.getenv("PRODUCER_MAX_RETRIES", "3"))
 
