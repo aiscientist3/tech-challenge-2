@@ -149,7 +149,7 @@ def merge_upsert_to_bronze(
     preserve_columns: tuple[str, ...] = ALUNOS_BRONZE_PRESERVE_COLUMNS,
     partition_by: str | None = ALUNOS_BRONZE_PARTITION_BY,
 ) -> int:
-    """Upsert alunos into Bronze Delta (preserves legacy _batch_id on update)."""
+    """Upsert alunos into Bronze Delta (streaming path)."""
     return merge_upsert_to_delta_table(
         pdf,
         table_path=bronze_path,
@@ -191,7 +191,6 @@ def parse_kafka_envelope(kafka_df: DataFrame) -> DataFrame:
             col("event.event_id"),
             col("event.event_type"),
             col("event.event_timestamp"),
-            col("event.ano"),
             col("event.payload"),
             col("topic"),
             col("partition"),
@@ -208,7 +207,7 @@ def expand_payload_to_bronze_records(
     natural_keys: tuple[str, ...] = ALUNOS_NATURAL_KEYS,
     ingestion_ts: str | None = None,
 ) -> list[dict]:
-    """Expand JSON payloads into row dicts with streaming metadata."""
+    """Expand JSON payloads into row dicts with streaming metadata (Bronze only)."""
     resolved_ts = ingestion_ts or datetime.now(timezone.utc).isoformat()
     records: list[dict] = []
     for row in envelope_df.collect():
@@ -223,8 +222,6 @@ def expand_payload_to_bronze_records(
                 exc,
             )
             continue
-        if record.get("ano") is None and row.ano is not None:
-            record["ano"] = int(row.ano)
         if not record_has_natural_keys(record, natural_keys):
             logger.warning(
                 "Skipping event %s: missing natural keys %s.",
@@ -233,15 +230,9 @@ def expand_payload_to_bronze_records(
             )
             continue
         record["_event_id"] = row.event_id
-        record["_event_type"] = row.event_type
-        record["_event_timestamp"] = row.event_timestamp
-        record["_kafka_topic"] = row.topic
         record["_kafka_partition"] = row.partition
         record["_kafka_offset"] = row.offset
         record["_ingestion_timestamp"] = resolved_ts
-        record["_ingestion_mode"] = "stream"
-        record["_stream_sink"] = "kafka"
-        record["_source_table"] = source_table
         records.append(record)
     return records
 

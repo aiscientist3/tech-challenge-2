@@ -4,8 +4,10 @@ Silver layer writer for streaming alunos — reads from Bronze, never from Kafka
 Medallion rule: Kafka → Bronze (MERGE) → Silver (MERGE).
 
 After each Bronze micro-batch is persisted, Silver transforms that Bronze slice,
-validates quality, quarantines invalid rows, and upserts only valid rows into
-Silver by (ano, id_aluno) — no duplicate keys.
+projects business columns (FinOps), validates quality, quarantines invalid rows,
+and upserts only valid rows into Silver by (ano, id_aluno) — no duplicate keys.
+
+Kafka / event lineage columns stay on Bronze only.
 """
 
 from __future__ import annotations
@@ -17,7 +19,11 @@ from typing import TYPE_CHECKING
 
 from ingestion.silver.quality import validate_entity
 from ingestion.silver.quarantine_writer import QuarantineWriter
-from ingestion.silver.transforms import deduplicate, standardize_common
+from ingestion.silver.transforms import (
+    deduplicate,
+    project_alunos_for_silver,
+    standardize_common,
+)
 from ingestion.streaming.bronze_stream_writer import merge_upsert_to_delta_table
 from ingestion.streaming.config import (
     ALUNOS_NATURAL_KEYS,
@@ -41,7 +47,7 @@ def prepare_alunos_silver_batch(
     stream_batch_id: str,
     ingestion_ts: str,
 ) -> pd.DataFrame:
-    """Apply Silver standardisation and attach streaming metadata."""
+    """Standardise, dedupe, project columns and attach Silver streaming metadata."""
     if pdf.empty:
         return pdf
 
@@ -49,9 +55,8 @@ def prepare_alunos_silver_batch(
     treated = deduplicate(treated, ALUNOS_NATURAL_KEYS, entity_name="alunos")
     treated = treated.copy()
     treated["_silver_processed_at"] = ingestion_ts
-    treated["_silver_ingestion_mode"] = "stream"
-    treated["_silver_stream_sink"] = "bronze"
     treated["_silver_stream_batch_id"] = stream_batch_id
+    treated = project_alunos_for_silver(treated)
     return treated
 
 
