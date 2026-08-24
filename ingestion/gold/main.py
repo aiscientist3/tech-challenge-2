@@ -4,6 +4,7 @@ Gold layer entry point — Silver → analytical indicators → Gold.
 CLI usage:
   python -m ingestion.gold.main --datasets all --years 2023,2024
   python -m ingestion.gold.main --datasets indicador_crianca_alfabetizada_municipio --years 2024
+  python -m ingestion.gold.main --datasets contexto_territorio,alunos_features --years 2024
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ import logging
 import os
 import sys
 import uuid
+
+import pandas as pd
 
 from ingestion.batch.metrics import publish_quality_metrics
 from ingestion.common.dbutils import get_dbutils
@@ -29,12 +32,22 @@ from ingestion.gold.config import (
 )
 from ingestion.gold.gold_writer import GoldWriter
 from ingestion.gold.quality import (
+    GoldQualityResult,
     log_meta_coverage_warning,
+    validate_alunos_features,
+    validate_contexto_territorio,
     validate_indicador_municipio,
     validate_indicador_uf,
 )
 from ingestion.gold.silver_reader import read_silver
-from ingestion.gold.transforms import build_indicador_municipio, build_indicador_uf
+from ingestion.gold.transforms import (
+    attach_prefixed_meta,
+    attach_territorio_municipio,
+    build_alunos_features,
+    build_contexto_territorio,
+    build_indicador_municipio,
+    build_indicador_uf,
+)
 from ingestion.silver.quarantine_writer import QuarantineWriter
 
 logging.basicConfig(
@@ -159,6 +172,59 @@ def _resolve_bucket() -> str:
         raise
 
 
+def _read_optional_silver(
+    bucket: str,
+    entity: str,
+    storage_options: dict[str, str],
+    *,
+    years: list[int] | None,
+    partition_col: str | None,
+) -> pd.DataFrame:
+    """Read a Silver table; missing/unreadable tables become empty frames."""
+    path = silver_table_path(bucket, entity)
+    try:
+        return read_silver(
+            path,
+            storage_options,
+            years=years,
+            partition_col=partition_col,
+        )
+    except RuntimeError as exc:
+        logger.warning("Silver table '%s' unavailable (%s). Using empty frame.", entity, exc)
+        return pd.DataFrame()
+
+
+def _publish(
+    *,
+    name: str,
+    quality: GoldQualityResult,
+    writer: GoldWriter,
+    quarantine_writer: QuarantineWriter,
+    gold_configs: dict,
+    batch_id: str,
+    overwrite: bool,
+    results: dict[str, str | None],
+    quarantine_counts: dict[str, int],
+    record_counts: dict[str, int],
+) -> None:
+    if not quality.quarantine_df.empty:
+        quarantine_writer.write(
+            quality.quarantine_df,
+            entity_name=name,
+            batch_id=batch_id,
+            partition_by="ano",
+            layer="gold",
+        )
+    results[name] = writer.write(
+        quality.valid_df,
+        gold_configs[name],
+        batch_id=batch_id,
+        overwrite=overwrite,
+    )
+    quarantine_counts[name] = quality.quarantine_count
+    record_counts[name] = len(quality.valid_df)
+
+
 def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
     batch_id = run_config.batch_id or str(uuid.uuid4())
     logger.info("=== GOLD PROCESSING STARTED ===")
@@ -174,27 +240,36 @@ def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
 
     logger.info("S3 bucket: %s", bucket)
 
-    logger.info("Loading Silver reference tables...")
-    alunos = read_silver(
-        silver_table_path(bucket, "alunos"),
-        storage_options,
-        years=run_config.years,
+    logger.info("Loading Silver tables...")
+    alunos = _read_optional_silver(
+        bucket, "alunos", storage_options, years=run_config.years, partition_col="ano"
     )
-    meta_municipio = read_silver(
-        silver_table_path(bucket, "meta_municipio"),
-        storage_options,
-        years=run_config.years,
+    meta_municipio = _read_optional_silver(
+        bucket, "meta_municipio", storage_options, years=run_config.years, partition_col="ano"
     )
-    meta_uf = read_silver(
-        silver_table_path(bucket, "meta_uf"),
-        storage_options,
-        years=run_config.years,
+    meta_uf = _read_optional_silver(
+        bucket, "meta_uf", storage_options, years=run_config.years, partition_col="ano"
     )
-    municipio = read_silver(
-        silver_table_path(bucket, "municipio"),
-        storage_options,
-        years=None,
-        partition_col=None,
+    meta_brasil = _read_optional_silver(
+        bucket, "meta_brasil", storage_options, years=run_config.years, partition_col="ano"
+    )
+    municipio = _read_optional_silver(
+        bucket, "municipio", storage_options, years=None, partition_col=None
+    )
+    populacao = _read_optional_silver(
+        bucket, "populacao_municipio", storage_options, years=None, partition_col="ano"
+    )
+    pib = _read_optional_silver(
+        bucket, "pib_municipio", storage_options, years=None, partition_col="ano"
+    )
+    socioeconomico = _read_optional_silver(
+        bucket, "socioeconomico_municipio", storage_options, years=None, partition_col="ano"
+    )
+    municipio_indicadores = _read_optional_silver(
+        bucket, "municipio_indicadores", storage_options, years=None, partition_col="ano"
+    )
+    uf_indicadores = _read_optional_silver(
+        bucket, "uf_indicadores", storage_options, years=None, partition_col="ano"
     )
 
     results: dict[str, str | None] = {}
@@ -204,6 +279,10 @@ def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
     if "indicador_crianca_alfabetizada_municipio" in run_config.datasets:
         logger.info("--- Building indicador_crianca_alfabetizada_municipio ---")
         indicador_mun = build_indicador_municipio(alunos, meta_municipio)
+        indicador_mun = attach_territorio_municipio(indicador_mun, municipio)
+        indicador_mun = attach_prefixed_meta(
+            indicador_mun, meta_brasil, ["ano", "rede"], prefix="brasil_"
+        )
         log_meta_coverage_warning(
             indicador_mun,
             dataset_name="indicador_crianca_alfabetizada_municipio",
@@ -211,53 +290,94 @@ def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
         mun_quality = validate_indicador_municipio(
             indicador_mun, meta_municipio, municipio
         )
-        if not mun_quality.quarantine_df.empty:
-            quarantine_writer.write(
-                mun_quality.quarantine_df,
-                entity_name="indicador_crianca_alfabetizada_municipio",
-                batch_id=batch_id,
-                partition_by="ano",
-                layer="gold",
-            )
-        results["indicador_crianca_alfabetizada_municipio"] = writer.write(
-            mun_quality.valid_df,
-            gold_configs["indicador_crianca_alfabetizada_municipio"],
+        _publish(
+            name="indicador_crianca_alfabetizada_municipio",
+            quality=mun_quality,
+            writer=writer,
+            quarantine_writer=quarantine_writer,
+            gold_configs=gold_configs,
             batch_id=batch_id,
             overwrite=run_config.overwrite,
-        )
-        quarantine_counts["indicador_crianca_alfabetizada_municipio"] = (
-            mun_quality.quarantine_count
-        )
-        record_counts["indicador_crianca_alfabetizada_municipio"] = len(
-            mun_quality.valid_df
+            results=results,
+            quarantine_counts=quarantine_counts,
+            record_counts=record_counts,
         )
 
     if "indicador_crianca_alfabetizada_uf" in run_config.datasets:
         logger.info("--- Building indicador_crianca_alfabetizada_uf ---")
         indicador_uf = build_indicador_uf(alunos, municipio, meta_uf)
+        indicador_uf = attach_prefixed_meta(
+            indicador_uf, meta_brasil, ["ano", "rede"], prefix="brasil_"
+        )
         log_meta_coverage_warning(
             indicador_uf,
             dataset_name="indicador_crianca_alfabetizada_uf",
         )
         uf_quality = validate_indicador_uf(indicador_uf, meta_uf, municipio)
-        if not uf_quality.quarantine_df.empty:
-            quarantine_writer.write(
-                uf_quality.quarantine_df,
-                entity_name="indicador_crianca_alfabetizada_uf",
-                batch_id=batch_id,
-                partition_by="ano",
-                layer="gold",
-            )
-        results["indicador_crianca_alfabetizada_uf"] = writer.write(
-            uf_quality.valid_df,
-            gold_configs["indicador_crianca_alfabetizada_uf"],
+        _publish(
+            name="indicador_crianca_alfabetizada_uf",
+            quality=uf_quality,
+            writer=writer,
+            quarantine_writer=quarantine_writer,
+            gold_configs=gold_configs,
             batch_id=batch_id,
             overwrite=run_config.overwrite,
+            results=results,
+            quarantine_counts=quarantine_counts,
+            record_counts=record_counts,
         )
-        quarantine_counts["indicador_crianca_alfabetizada_uf"] = (
-            uf_quality.quarantine_count
+
+    contexto = pd.DataFrame()
+    need_contexto = any(
+        name in run_config.datasets
+        for name in ("contexto_territorio", "alunos_features")
+    )
+    if need_contexto:
+        logger.info("--- Building contexto_territorio ---")
+        contexto = build_contexto_territorio(
+            meta_municipio=meta_municipio,
+            meta_uf=meta_uf,
+            meta_brasil=meta_brasil,
+            municipio=municipio,
+            populacao=populacao,
+            pib=pib,
+            socioeconomico=socioeconomico,
+            municipio_indicadores=municipio_indicadores,
+            uf_indicadores=uf_indicadores,
         )
-        record_counts["indicador_crianca_alfabetizada_uf"] = len(uf_quality.valid_df)
+
+    if "contexto_territorio" in run_config.datasets:
+        ctx_quality = validate_contexto_territorio(contexto, municipio)
+        _publish(
+            name="contexto_territorio",
+            quality=ctx_quality,
+            writer=writer,
+            quarantine_writer=quarantine_writer,
+            gold_configs=gold_configs,
+            batch_id=batch_id,
+            overwrite=run_config.overwrite,
+            results=results,
+            quarantine_counts=quarantine_counts,
+            record_counts=record_counts,
+        )
+        contexto = ctx_quality.valid_df
+
+    if "alunos_features" in run_config.datasets:
+        logger.info("--- Building alunos_features ---")
+        features = build_alunos_features(alunos, contexto)
+        feat_quality = validate_alunos_features(features, municipio)
+        _publish(
+            name="alunos_features",
+            quality=feat_quality,
+            writer=writer,
+            quarantine_writer=quarantine_writer,
+            gold_configs=gold_configs,
+            batch_id=batch_id,
+            overwrite=run_config.overwrite,
+            results=results,
+            quarantine_counts=quarantine_counts,
+            record_counts=record_counts,
+        )
 
     environment = os.getenv("ENVIRONMENT", "dev")
     publish_quality_metrics(

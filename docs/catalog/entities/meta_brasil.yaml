@@ -173,9 +173,11 @@ qualidade:
 lineage:
   upstream:
     - basedosdados.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_brasil
-  downstream_planejado:
+  downstream:
     - silver.meta_brasil
-    - gold.indicador_crianca_alfabetizada
+    - gold.contexto_territorio
+    - gold.indicador_crianca_alfabetizada_municipio
+    - gold.indicador_crianca_alfabetizada_uf
 
 contrato_dados:
   frequencia_carga: conforme agendamento Databricks Job

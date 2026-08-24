@@ -7,6 +7,7 @@ import pandas as pd
 from ingestion.gold.quality import (
     load_gold_quality_rules,
     log_meta_coverage_warning,
+    validate_alunos_features,
     validate_indicador_municipio,
     validate_indicador_uf,
 )
@@ -26,6 +27,11 @@ class TestLoadGoldQualityRules:
         rules = load_gold_quality_rules("indicador_crianca_alfabetizada_municipio")
         rule_ids = {rule.id for rule in rules}
         assert rule_ids == {"gold_taxa_faixa", "gold_referencia_territorial"}
+
+    def test_loads_alunos_features_rules(self) -> None:
+        rules = load_gold_quality_rules("alunos_features")
+        rule_ids = {rule.id for rule in rules}
+        assert rule_ids == {"gold_alfabetizado_faixa", "gold_referencia_territorial"}
 
 
 class TestGoldQuality:
@@ -107,3 +113,17 @@ class TestGoldQuality:
         )
         assert result.quarantine_count == 0
         assert len(result.valid_df) == 1
+
+    def test_quarantines_alunos_features_label_out_of_range(self) -> None:
+        features = pd.DataFrame(
+            {
+                "ano": [2024],
+                "id_aluno": ["A1"],
+                "id_municipio": ["3550308"],
+                "rede": ["municipal"],
+                "alfabetizado": [2.0],
+            }
+        )
+        result = validate_alunos_features(features, _municipio_ref())
+        assert result.quarantine_count == 1
+        assert result.summary["gold_alfabetizado_faixa"] == 1

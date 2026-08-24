@@ -39,6 +39,7 @@ ALUNOS_SILVER_BUSINESS_COLUMNS: tuple[str, ...] = (
     "id_aluno",
     "id_municipio",
     "rede",
+    "serie",
     "alfabetizado",
     "proficiencia",
     "peso_aluno",

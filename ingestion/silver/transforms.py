@@ -35,6 +35,9 @@ def standardize_common(df: pd.DataFrame) -> pd.DataFrame:
 
     result = df.copy()
 
+    if "PIB" in result.columns and "pib" not in result.columns:
+        result = result.rename(columns={"PIB": "pib"})
+
     if "ano" in result.columns:
         result["ano"] = pd.to_numeric(result["ano"], errors="coerce").astype("Int64")
 
@@ -159,6 +162,9 @@ def enrich_meta_municipio(
         "nome_uf",
         "nome_regiao",
         "capital_uf",
+        "nome_mesorregiao",
+        "nome_microrregiao",
+        "amazonia_legal",
     )
     available_cols = [col for col in municipio_cols if col in municipio.columns]
     if "id_municipio" not in available_cols:

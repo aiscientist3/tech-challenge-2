@@ -104,9 +104,19 @@ class BaseSource(ABC):
     # Query helpers
     # ------------------------------------------------------------------
 
+    def _years_for_filter(self) -> list[int]:
+        """Years used in the SQL filter, including optional lookback."""
+        years = list(self.run_config.years)
+        lookback = self.source_config.year_lookback
+        if lookback and years:
+            start = min(years) - lookback
+            end = max(years)
+            return list(range(start, end + 1))
+        return years
+
     def _year_filter_clause(self) -> str:
         """Build a WHERE clause to filter by the configured years."""
-        years = ", ".join(str(y) for y in self.run_config.years)
+        years = ", ".join(str(year) for year in self._years_for_filter())
         return f"ano IN ({years})"
 
     def _limit_clause(self) -> str:

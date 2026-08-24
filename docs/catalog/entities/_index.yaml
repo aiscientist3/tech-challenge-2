@@ -50,15 +50,39 @@ entidades:
   - id: municipio_indicadores
     arquivo: entities/municipio_indicadores.yaml
     status: completo
-    camada: nao_ingerido
+    camada: bronze
     tipo: indicador
     particionado: true
-    observacao: br_inep_avaliacao_alfabetizacao.municipio — fora do pipeline atual
+    observacao: br_inep_avaliacao_alfabetizacao.municipio — indicadores complementares (lag 1 ano na Gold)
 
   - id: uf_indicadores
     arquivo: entities/uf_indicadores.yaml
     status: completo
-    camada: nao_ingerido
+    camada: bronze
     tipo: indicador
     particionado: true
-    observacao: br_inep_avaliacao_alfabetizacao.uf — fora do pipeline atual
+    observacao: br_inep_avaliacao_alfabetizacao.uf — indicadores complementares (lag 1 ano na Gold)
+
+  - id: populacao_municipio
+    arquivo: entities/populacao_municipio.yaml
+    status: completo
+    camada: bronze
+    tipo: indicador
+    particionado: true
+    observacao: br_ibge_populacao.municipio — join as-of na Gold
+
+  - id: pib_municipio
+    arquivo: entities/pib_municipio.yaml
+    status: completo
+    camada: bronze
+    tipo: indicador
+    particionado: true
+    observacao: br_ibge_pib.municipio — join as-of na Gold
+
+  - id: socioeconomico_municipio
+    arquivo: entities/socioeconomico_municipio.yaml
+    status: completo
+    camada: bronze
+    tipo: indicador
+    particionado: true
+    observacao: br_ipea_avs.municipio — snapshot socioeconômico na Gold

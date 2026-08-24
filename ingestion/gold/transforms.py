@@ -1,7 +1,8 @@
 """
-Gold layer transformations — Indicador Criança Alfabetizada and gap analysis.
+Gold layer transformations — Indicador Criança Alfabetizada, territorial
+context, and student-level features for supervised modelling.
 
-Medallion: reads Silver tables only (alunos, meta_municipio, meta_uf, municipio).
+Medallion: reads Silver tables only.
 """
 
 from __future__ import annotations
@@ -10,12 +11,53 @@ import logging
 
 import pandas as pd
 
-from ingestion.gold.config import META_GOAL_YEARS
+from ingestion.gold.config import LEAKAGE_FEATURE_COLUMNS, META_GOAL_YEARS
 
 logger = logging.getLogger(__name__)
 
 META_GOAL_COLUMNS: tuple[str, ...] = tuple(
     f"meta_alfabetizacao_{year}" for year in META_GOAL_YEARS
+)
+
+_EXTRA_META_COLUMNS: tuple[str, ...] = (
+    "taxa_alfabetizacao",
+    *META_GOAL_COLUMNS,
+    "nome_municipio",
+    "nome_uf",
+    "sigla_uf",
+    "percentual_participacao",
+    "regiao_municipio",
+    "regiao_uf",
+    "capital_uf",
+    "nome_regiao",
+    "nome_mesorregiao",
+    "nome_microrregiao",
+    "amazonia_legal",
+)
+
+_TERRITORIAL_MUNICIPIO_COLS: tuple[str, ...] = (
+    "id_municipio",
+    "nome",
+    "sigla_uf",
+    "nome_uf",
+    "nome_regiao",
+    "capital_uf",
+    "nome_mesorregiao",
+    "nome_microrregiao",
+    "amazonia_legal",
+)
+
+_INEP_LAG_VALUE_COLS: tuple[str, ...] = (
+    "taxa_alfabetizacao",
+    "media_portugues",
+    *(f"proporcao_aluno_nivel_{level}" for level in range(9)),
+)
+
+_SOCIO_VALUE_COLS: tuple[str, ...] = (
+    "ivs",
+    "ivs_infraestrutura_urbana",
+    "ivs_capital_humano",
+    "ivs_renda_e_trabalho",
 )
 
 
@@ -101,14 +143,18 @@ def add_gap_analysis(
     if indicator.empty:
         return indicator.copy()
 
+    available_keys = [key for key in join_keys if key in meta.columns]
     meta_cols = [
         col
-        for col in [official_rate_col, *META_GOAL_COLUMNS, "nome_municipio", "nome_uf"]
-        if col in meta.columns
+        for col in _EXTRA_META_COLUMNS
+        if col in meta.columns and col not in available_keys
     ]
-    meta_subset = meta[join_keys + meta_cols].drop_duplicates(subset=join_keys)
+    if official_rate_col not in meta_cols and official_rate_col in meta.columns:
+        meta_cols = [official_rate_col, *meta_cols]
 
-    enriched = indicator.merge(meta_subset, on=join_keys, how="left")
+    meta_subset = meta[available_keys + meta_cols].drop_duplicates(subset=available_keys)
+
+    enriched = indicator.merge(meta_subset, on=available_keys, how="left")
 
     if official_rate_col in enriched.columns:
         enriched["gap_taxa_vs_inep"] = (
@@ -124,6 +170,214 @@ def add_gap_analysis(
             )
 
     return enriched
+
+
+def attach_prefixed_meta(
+    left: pd.DataFrame,
+    meta: pd.DataFrame,
+    join_keys: list[str],
+    prefix: str,
+) -> pd.DataFrame:
+    """Left-join meta columns with a prefix (national / UF goals)."""
+    if left.empty or meta.empty:
+        return left.copy()
+
+    available_keys = [key for key in join_keys if key in meta.columns and key in left.columns]
+    if not available_keys:
+        return left.copy()
+
+    value_cols = [col for col in _EXTRA_META_COLUMNS if col in meta.columns and col not in available_keys]
+    if not value_cols:
+        return left.copy()
+
+    subset = meta[available_keys + value_cols].drop_duplicates(subset=available_keys)
+    renamed = subset.rename(columns={col: f"{prefix}{col}" for col in value_cols})
+    return left.merge(renamed, on=available_keys, how="left")
+
+
+def attach_territorio_municipio(
+    df: pd.DataFrame,
+    municipio: pd.DataFrame,
+) -> pd.DataFrame:
+    """Join remaining territorial attributes from the municipality directory."""
+    if df.empty or municipio.empty or "id_municipio" not in df.columns:
+        return df.copy()
+
+    cols = [col for col in _TERRITORIAL_MUNICIPIO_COLS if col in municipio.columns]
+    lookup = (
+        municipio[cols]
+        .rename(
+            columns={
+                "nome": "nome_municipio",
+                "nome_regiao": "nome_regiao",
+            }
+        )
+        .drop_duplicates(subset=["id_municipio"])
+    )
+    extra = [col for col in lookup.columns if col == "id_municipio" or col not in df.columns]
+    if extra == ["id_municipio"]:
+        return df.copy()
+    return df.merge(lookup[extra], on="id_municipio", how="left")
+
+
+def as_of_join(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    *,
+    by: str,
+    time_col: str,
+    value_cols: list[str],
+    right_time_alias: str,
+) -> pd.DataFrame:
+    """Attach the latest ``right`` row per entity with ``time_col`` <= left time."""
+    result = left.copy()
+    present_values = [col for col in value_cols if col in right.columns]
+    for col in present_values:
+        if col not in result.columns:
+            result[col] = pd.NA
+    if right_time_alias not in result.columns:
+        result[right_time_alias] = pd.NA
+
+    if (
+        result.empty
+        or right.empty
+        or by not in result.columns
+        or by not in right.columns
+        or time_col not in result.columns
+        or time_col not in right.columns
+        or not present_values
+    ):
+        return result
+
+    take = [by, time_col, *present_values]
+    right_sub = right[take].dropna(subset=[by, time_col]).drop_duplicates()
+    if right_sub.empty:
+        return result
+
+    result["_row_id"] = range(len(result))
+    left_ok = result.dropna(subset=[by, time_col]).copy()
+    left_na = result.loc[~result.index.isin(left_ok.index)].copy()
+
+    left_ok[time_col] = pd.to_numeric(left_ok[time_col], errors="coerce")
+    right_sub[time_col] = pd.to_numeric(right_sub[time_col], errors="coerce")
+    left_ok = left_ok.dropna(subset=[time_col])
+    right_sub = right_sub.dropna(subset=[time_col])
+    left_ok[time_col] = left_ok[time_col].astype("int64")
+    right_sub[time_col] = right_sub[time_col].astype("int64")
+    left_ok[by] = left_ok[by].astype("string")
+    right_sub[by] = right_sub[by].astype("string")
+
+    if left_ok.empty or right_sub.empty:
+        return result.drop(columns=["_row_id"])
+
+    right_sub = right_sub.rename(columns={time_col: right_time_alias})
+    # Drop placeholder columns so merge_asof can attach real values.
+    drop_placeholders = [
+        col for col in [*present_values, right_time_alias] if col in left_ok.columns
+    ]
+    left_ok = left_ok.drop(columns=drop_placeholders)
+
+    merged = pd.merge_asof(
+        left_ok.sort_values([by, time_col]),
+        right_sub.sort_values([by, right_time_alias]),
+        left_on=time_col,
+        right_on=right_time_alias,
+        by=by,
+        direction="backward",
+    )
+    combined = pd.concat([merged, left_na], ignore_index=True)
+    combined = combined.sort_values("_row_id").drop(columns=["_row_id"])
+    return combined.reset_index(drop=True)
+
+
+def snapshot_join(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    *,
+    by: str,
+    time_col: str,
+    value_cols: list[str],
+    year_alias: str,
+) -> pd.DataFrame:
+    """Broadcast the latest snapshot per entity (e.g. AVS 2010) onto ``left``."""
+    result = left.copy()
+    present_values = [col for col in value_cols if col in right.columns]
+    if result.empty or right.empty or by not in result.columns or not present_values:
+        for col in present_values:
+            if col not in result.columns:
+                result[col] = pd.NA
+        if year_alias not in result.columns:
+            result[year_alias] = pd.NA
+        return result
+
+    usable = right.dropna(subset=[by, time_col]) if time_col in right.columns else right.dropna(subset=[by])
+    if usable.empty:
+        return result
+
+    if time_col in usable.columns:
+        idx = usable.groupby(by, dropna=False)[time_col].idxmax()
+        snap = usable.loc[idx, [by, time_col, *present_values]].rename(
+            columns={time_col: year_alias}
+        )
+    else:
+        snap = usable[[by, *present_values]].drop_duplicates(subset=[by])
+        snap[year_alias] = pd.NA
+
+    extra = [col for col in snap.columns if col == by or col not in result.columns]
+    return result.merge(snap[extra], on=by, how="left")
+
+
+def _filter_segundo_ano_or_aggregate(
+    indicators: pd.DataFrame,
+    group_keys: list[str],
+) -> pd.DataFrame:
+    """Prefer 2º ano rows; otherwise mean numeric columns at ``group_keys``."""
+    if indicators.empty:
+        return indicators.copy()
+
+    working = indicators.copy()
+    if "serie" in working.columns:
+        serie = working["serie"].astype("string").str.lower()
+        segundo = working[serie.str.contains(r"2\s*[ºo°]?\s*ano", regex=True, na=False)]
+        if not segundo.empty:
+            working = segundo
+
+    numeric_cols = [
+        col
+        for col in _INEP_LAG_VALUE_COLS
+        if col in working.columns
+    ]
+    present_keys = [key for key in group_keys if key in working.columns]
+    if not present_keys or not numeric_cols:
+        return working
+
+    aggregated = (
+        working.groupby(present_keys, dropna=False)[numeric_cols]
+        .mean()
+        .reset_index()
+    )
+    return aggregated
+
+
+def lag_indicators(
+    indicators: pd.DataFrame,
+    *,
+    group_keys: list[str],
+    prefix: str = "lag1_",
+) -> pd.DataFrame:
+    """Shift indicator year by +1 so they join onto the following cohort."""
+    preferred = _filter_segundo_ano_or_aggregate(indicators, group_keys)
+    if preferred.empty or "ano" not in preferred.columns:
+        return pd.DataFrame()
+
+    lagged = preferred.copy()
+    lagged["ano"] = pd.to_numeric(lagged["ano"], errors="coerce") + 1
+    rename = {
+        col: f"{prefix}{col}"
+        for col in lagged.columns
+        if col not in group_keys and col != "ano"
+    }
+    return lagged.rename(columns=rename)
 
 
 def build_indicador_municipio(
@@ -205,3 +459,145 @@ def build_indicador_uf(
         indicator["ano"].nunique() if "ano" in indicator.columns else 0,
     )
     return indicator
+
+
+def build_contexto_territorio(
+    meta_municipio: pd.DataFrame,
+    meta_uf: pd.DataFrame,
+    meta_brasil: pd.DataFrame,
+    municipio: pd.DataFrame,
+    populacao: pd.DataFrame,
+    pib: pd.DataFrame,
+    socioeconomico: pd.DataFrame,
+    municipio_indicadores: pd.DataFrame,
+    uf_indicadores: pd.DataFrame,
+) -> pd.DataFrame:
+    """Build the municipal feature store used by BI and ``alunos_features``."""
+    if meta_municipio.empty:
+        logger.warning("Cannot build contexto_territorio: empty meta_municipio.")
+        return pd.DataFrame()
+
+    contexto = meta_municipio.copy()
+    contexto = attach_territorio_municipio(contexto, municipio)
+    contexto = attach_prefixed_meta(
+        contexto, meta_uf, ["ano", "sigla_uf", "rede"], prefix="uf_"
+    )
+    contexto = attach_prefixed_meta(
+        contexto, meta_brasil, ["ano", "rede"], prefix="brasil_"
+    )
+
+    contexto = as_of_join(
+        contexto,
+        populacao,
+        by="id_municipio",
+        time_col="ano",
+        value_cols=["populacao"],
+        right_time_alias="populacao_ano_ref",
+    )
+    contexto = as_of_join(
+        contexto,
+        pib,
+        by="id_municipio",
+        time_col="ano",
+        value_cols=["pib"],
+        right_time_alias="pib_ano_ref",
+    )
+
+    if "pib" in contexto.columns and "populacao" in contexto.columns:
+        pib_num = pd.to_numeric(contexto["pib"], errors="coerce")
+        pop_num = pd.to_numeric(contexto["populacao"], errors="coerce")
+        contexto["pib_per_capita"] = pib_num / pop_num.replace(0, pd.NA)
+
+    contexto = snapshot_join(
+        contexto,
+        socioeconomico,
+        by="id_municipio",
+        time_col="ano",
+        value_cols=list(_SOCIO_VALUE_COLS),
+        year_alias="socio_ano_ref",
+    )
+
+    lagged_mun = lag_indicators(
+        municipio_indicadores,
+        group_keys=["ano", "id_municipio", "rede"],
+    )
+    if not lagged_mun.empty:
+        lag_keys = [
+            key for key in ["ano", "id_municipio", "rede"] if key in lagged_mun.columns
+        ]
+        contexto = contexto.merge(lagged_mun, on=lag_keys, how="left")
+
+    if "sigla_uf" in contexto.columns:
+        lagged_uf = lag_indicators(
+            uf_indicadores,
+            group_keys=["ano", "sigla_uf", "rede"],
+            prefix="lag1_uf_",
+        )
+        if not lagged_uf.empty:
+            lag_keys = [
+                key for key in ["ano", "sigla_uf", "rede"] if key in lagged_uf.columns
+            ]
+            contexto = contexto.merge(lagged_uf, on=lag_keys, how="left")
+
+    logger.info("contexto_territorio built: %d rows.", len(contexto))
+    return contexto
+
+
+def _drop_leakage_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove same-year outcome columns that would leak the literacy label."""
+    extra_lag_unprefixed = [
+        col
+        for col in df.columns
+        if col.startswith("proporcao_aluno_nivel_") and not col.startswith("lag1_")
+    ]
+    drop = [
+        col
+        for col in (*LEAKAGE_FEATURE_COLUMNS, *extra_lag_unprefixed, "media_portugues")
+        if col in df.columns and not col.startswith("lag1_")
+    ]
+    if not drop:
+        return df
+    return df.drop(columns=drop)
+
+
+def build_alunos_features(
+    alunos: pd.DataFrame,
+    contexto: pd.DataFrame,
+) -> pd.DataFrame:
+    """Join student microdata to territorial context without label leakage."""
+    if alunos.empty:
+        logger.warning("No alunos rows for alunos_features.")
+        return pd.DataFrame()
+
+    features = alunos.copy()
+    features["alfabetizado"] = normalize_alfabetizado_flag(
+        features.get("alfabetizado", pd.Series(dtype="string"))
+    )
+
+    drop_student = [col for col in ("proficiencia",) if col in features.columns]
+    if drop_student:
+        features = features.drop(columns=drop_student)
+
+    if contexto.empty:
+        logger.warning("contexto_territorio is empty — alunos_features without context.")
+        return _drop_leakage_columns(features)
+
+    context_clean = _drop_leakage_columns(contexto)
+    join_keys = [
+        key
+        for key in ["ano", "id_municipio", "rede"]
+        if key in features.columns and key in context_clean.columns
+    ]
+    overlap = [
+        col
+        for col in context_clean.columns
+        if col in features.columns and col not in join_keys
+    ]
+    if overlap:
+        context_clean = context_clean.drop(columns=overlap)
+
+    features = features.merge(context_clean, on=join_keys, how="left")
+    features = _drop_leakage_columns(features)
+
+    logger.info("alunos_features built: %d rows.", len(features))
+    return features

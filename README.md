@@ -90,10 +90,10 @@ flowchart TD
 
 | Etapa | Origem | Destino | Modo |
 |---|---|---|---|
-| Bronze batch | BigQuery (UF, município, metas) | `s3://…/bronze/…` | Job periódico |
+| Bronze batch | BigQuery (território, metas, IBGE, INEP) | `s3://…/bronze/…` | Job periódico |
 | Streaming alunos | BigQuery → Producer → Kafka | Bronze MERGE → Silver MERGE | Micro-batch `AvailableNow` |
 | Silver batch | Bronze Delta | `s3://…/silver/…` (+ quarentena) | Job após Bronze |
-| Gold batch | Silver (`alunos` + metas) | `s3://…/gold/…` (+ quarentena) | Job após Silver |
+| Gold batch | Silver (`alunos` + metas + contexto IBGE/INEP) | `s3://…/gold/…` (+ quarentena) | Job após Silver |
 
 Ordem recomendada: **Bronze batch → Silver batch → Gold batch**. Streaming de `alunos` pode rodar em paralelo após o broker Kafka estar disponível.
 
@@ -192,6 +192,11 @@ tech-challenge-2/
 | Meta Brasil | `...meta_alfabetizacao_brasil` | `bronze/.../meta_brasil/ano=…/` |
 | Meta UF | `...meta_alfabetizacao_uf` | `bronze/.../meta_uf/ano=…/` |
 | Meta Município | `...meta_alfabetizacao_municipio` | `bronze/.../meta_municipio/ano=…/` |
+| População | `basedosdados.br_ibge_populacao.municipio` | `bronze/.../populacao_municipio/` |
+| PIB | `basedosdados.br_ibge_pib.municipio` | `bronze/.../pib_municipio/` |
+| Socioeconômico | `basedosdados.br_ipea_avs.municipio` | `bronze/.../socioeconomico_municipio/` |
+| Indicadores município | `...avaliacao_alfabetizacao.municipio` | `bronze/.../municipio_indicadores/` |
+| Indicadores UF | `...avaliacao_alfabetizacao.uf` | `bronze/.../uf_indicadores/` |
 
 ### Streaming — microdados de alunos
 
@@ -213,11 +218,13 @@ tech-challenge-2/
 
 ```
 s3://<bucket>/
-├── bronze/br_inep_alfabetizacao/{uf,municipio,meta_*,alunos}/
-├── silver/br_inep_alfabetizacao/{uf,municipio,meta_*,alunos}/
+├── bronze/br_inep_alfabetizacao/{uf,municipio,meta_*,populacao_municipio,pib_municipio,socioeconomico_municipio,municipio_indicadores,uf_indicadores,alunos}/
+├── silver/br_inep_alfabetizacao/{uf,municipio,meta_*,populacao_municipio,pib_municipio,socioeconomico_municipio,municipio_indicadores,uf_indicadores,alunos}/
 ├── gold/br_inep_alfabetizacao/
 │   ├── indicador_crianca_alfabetizada_municipio/
-│   └── indicador_crianca_alfabetizada_uf/
+│   ├── indicador_crianca_alfabetizada_uf/
+│   ├── contexto_territorio/
+│   └── alunos_features/
 └── quarantine/br_inep_alfabetizacao/{silver|gold}/{entity}/
 ```
 
@@ -240,7 +247,7 @@ s3://<bucket>/
 - Gate de qualidade (completude, domínio, FK) → válidos na Silver / inválidos na quarentena
 - **`alunos` (streaming):** projeção FinOps — Silver guarda só colunas de negócio/quality/Gold; linhagem Kafka (`_kafka_*`, `_event_*`) permanece **apenas na Bronze**
 
-Entidades: `uf`, `municipio`, `meta_brasil`, `meta_uf`, `meta_municipio`, `alunos`.
+Entidades: `uf`, `municipio`, `meta_brasil`, `meta_uf`, `meta_municipio`, `populacao_municipio`, `pib_municipio`, `socioeconomico_municipio`, `municipio_indicadores`, `uf_indicadores`, `alunos`.
 
 ### Gold — analítica
 
@@ -248,10 +255,14 @@ Datasets:
 
 | Dataset | Conteúdo |
 |---|---|
-| `indicador_crianca_alfabetizada_municipio` | Taxa ponderada por município/rede + gaps |
-| `indicador_crianca_alfabetizada_uf` | Taxa ponderada por UF/rede + gaps |
+| `indicador_crianca_alfabetizada_municipio` | Taxa ponderada por município/rede + gaps + metas nacionais |
+| `indicador_crianca_alfabetizada_uf` | Taxa ponderada por UF/rede + gaps + metas nacionais |
+| `contexto_territorio` | Feature store municipal: metas, território/região, população as-of, PIB, IVS, INEP defasado 1 ano |
+| `alunos_features` | Uma linha por aluno: rótulo `alfabetizado` (0/1) + contexto; **sem** `proficiencia` nem taxa INEP do mesmo ano |
 
-Inclui comparação com taxas INEP e **metas 2024–2030** (`gap_meta_YYYY`). Preparado para BI, análises e modelos (ver seção [Aplicação em IA](#aplicação-em-ia)).
+Inclui comparação com taxas INEP e **metas 2024–2030** (`gap_meta_YYYY`). `alunos_features` é o dataset para o modelo supervisionado (ver [Aplicação em IA](#aplicação-em-ia)).
+
+**Anti-leakage:** o corte Saeb 743 define `alfabetizado` a partir de `proficiencia`; taxas e níveis SAEB do mesmo ano são agregados da mesma avaliação. Esses campos não entram em `alunos_features`. Indicadores INEP entram só com **lag de 1 ano** (2024 usa 2023; 2023 fica nulo se não houver 2022).
 
 ---
 
@@ -297,16 +308,17 @@ Setup: [`terraform/README.md`](terraform/README.md#monitoring).
 
 ## Aplicação em IA
 
-A camada Gold concentra features prontas para modelagem e análise avançada:
+A Gold publica um feature store no **grão do aluno** (`alunos_features`) para classificar se a criança está alfabetizada, e um contexto municipal (`contexto_territorio`) para BI.
 
-| Uso | Como a Gold ajuda |
-|---|---|
-| Predição de alfabetização | Taxa observada, gaps vs metas 2024–2030, rede, território |
-| Desigualdade educacional | Comparar municípios/UFs e redes (municipal × estadual × privada) |
-| Políticas públicas | Priorizar localidades com maior `gap_meta_*` / pior tendência |
-| Clustering de vulnerabilidade | Combinar Gold com bases externas (IBGE, CadÚnico — opcional, fora do escopo atual) |
+| Uso | Dataset | Como a Gold ajuda |
+|---|---|---|
+| Predição supervisionada | `alunos_features` | Rótulo `alfabetizado`; features `rede`, `serie`, território, metas, pop/PIB as-of, IVS, INEP `lag1_*` |
+| Desigualdade educacional | indicadores ICA + contexto | Comparar municípios/UFs e redes |
+| Políticas públicas | indicadores ICA | Priorizar localidades com maior `gap_meta_*` |
 
-O ponto de corte Saeb (**743**) e o Indicador Criança Alfabetizada são o fio condutor semântico para features e labels em estudos futuros.
+**Não usar como feature:** `proficiencia`, `taxa_alfabetizacao` / `media_portugues` / níveis SAEB do **mesmo ano**, nem `taxa_crianca_alfabetizada` do mesmo recorte — vazam o rótulo.
+
+CadÚnico e Censo Escolar no grão escola ficam de fora: `alunos` não tem chave de domicílio e `id_escola` é máscara fictícia.
 
 ---
 
@@ -533,9 +545,10 @@ Estimativa monetária detalhada: [`docs/finops-estimativa-custos.md`](docs/finop
 
 ### Implementado
 
-- [x] Bronze batch (UF, município, metas)
+- [x] Bronze batch (UF, município, metas, população, PIB, AVS, indicadores INEP)
 - [x] Silver batch (padronização, dedup, joins, qualidade, quarentena)
-- [x] Gold (indicadores município/UF + gap vs metas 2024–2030)
+- [x] Gold (indicadores município/UF + contexto territorial + `alunos_features` para ML)
+- [x] Enriquecimento IBGE/IPEA (população, PIB, AVS) e indicadores INEP complementares
 - [x] Streaming `alunos` (producer + Kafka EC2 + consumer Bronze→Silver)
 - [x] Qualidade YAML + métricas CloudWatch
 - [x] Monitoramento (alarms, SNS, Databricks e-mail)
@@ -546,7 +559,7 @@ Estimativa monetária detalhada: [`docs/finops-estimativa-custos.md`](docs/finop
 - [ ] Amazon MSK (substituir broker EC2)
 - [ ] Alertas CloudWatch dedicados a `quality_pass_rate` / pico de quarentena
 - [ ] Lifecycle/expiração do prefixo `quarantine/`
-- [ ] Enriquecimento externo (IBGE, CadÚnico, Censo Escolar) — opcional no PDF
+- [ ] CadÚnico / Censo Escolar no grão escola (sem chave de join em `alunos`)
 - [ ] Dashboard BI sobre a Gold
 - [ ] Workflow Databricks multi-task (Bronze → Silver → Gold encadeado)
 - [ ] Vídeo executivo (até 5 min) — entrega do PDF, fora do repositório

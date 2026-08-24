@@ -21,15 +21,17 @@ diretórios Brasil), já em **Parquet + Snappy** (Delta Lake):
 |---|---|
 | Diretórios UF/Município | ~5–20 MB |
 | Metas Brasil/UF/Município (2 anos) | ~50–200 MB |
+| População, PIB, AVS, indicadores INEP | ~20–80 MB |
 | Microdados `alunos` (2 anos, amostra operacional do challenge) | ~8–15 GB Bronze |
 | Silver (tratado + enriquecido) | ~6–12 GB |
-| Gold (indicadores UF/município) | ~50–300 MB |
+| Gold (indicadores UF/município + `contexto_territorio`) | ~100–500 MB |
+| Gold (`alunos_features`, grão aluno) | ~6–12 GB |
 | Quarentena (`quarantine/...`, append-only) | ~50 MB – 1 GB* |
 | Checkpoints / logs / versões Delta | ~1–2 GB |
 
 \*Depende da taxa de rejeição das regras de qualidade. Com pass rate alto (&gt;95%),
 fica na casa de dezenas/centenas de MB. Com dados muito sujos, pode crescer sem
-lifecycle dedicado.
+lifecycle dedicado. `alunos_features` replica a ordem de grandeza da Silver `alunos`.
 
 ---
 
@@ -60,7 +62,8 @@ ganho FinOps principal é **evitar desperdício downstream** e ter sinais
 | **Bronze** (hot, &lt;90 dias) | 12 GB | S3 Standard (~US$ 0,023/GB) | 12 × 0,023 | **~US$ 0,28** |
 | **Bronze** (cold, após lifecycle) | 12 GB | S3 Standard-IA (~US$ 0,0125/GB) | 12 × 0,0125 | **~US$ 0,15** |
 | **Silver** | 10 GB | S3 Standard | 10 × 0,023 | **~US$ 0,23** |
-| **Gold** | 0,3 GB | S3 Standard | 0,3 × 0,023 | **~US$ 0,01** |
+| **Gold** (indicadores) | 0,3 GB | S3 Standard | 0,3 × 0,023 | **~US$ 0,01** |
+| **Gold** (`alunos_features`) | 8 GB | S3 Standard | 8 × 0,023 | **~US$ 0,18** |
 | **Quarentena** (`quarantine/`) | 0,1–1 GB | S3 Standard (sem lifecycle ainda) | 0,1–1 × 0,023 | **~US$ 0,00–0,02** |
 | Requests + versionamento (margem) | — | GET/PUT/LIST | — | **~US$ 0,50–1,50** |
 | **Subtotal storage (cenário steady)** | | | | **~US$ 1–3 / mês** |
@@ -84,9 +87,9 @@ Durações abaixo **já incluem** overhead típico de qualidade + quarentena.
 |---|---|---|---|---|---|
 | Bronze (metas + diretórios) | 8–15 min | ~0,5–1,5 DBU | ~US$ 0,40–1,20 | 22 | **~US$ 9–26** |
 | Silver (transforms + joins + quality) | 12–25 min | ~1,1–2,3 DBU | ~US$ 0,80–1,80 | 22 | **~US$ 18–40** |
-| Gold (indicadores + quality) | 4–10 min | ~0,4–1,0 DBU | ~US$ 0,25–0,75 | 22 | **~US$ 6–17** |
+| Gold (indicadores + contexto + `alunos_features`) | 8–20 min | ~0,8–2,5 DBU | ~US$ 0,55–2,00 | 22 | **~US$ 12–44** |
 | BigQuery (bytes scanned, 2 anos filtrados) | — | ~2–8 GB billed | ~US$ 0,01–0,05/run | 22 | **~US$ 0,20–1** |
-| **Subtotal batch** | | | | | **~US$ 33–84 / mês** |
+| **Subtotal batch** | | | | | **~US$ 39–111 / mês** |
 
 \*DBU Serverless Jobs: use o preço do seu workspace (ordem ~US$ 0,70–0,90/DBU; varia por região/contrato).
 
@@ -95,7 +98,7 @@ Durações abaixo **já incluem** overhead típico de qualidade + quarentena.
 | Cenário | Frequência | Anos | Custo batch/mês |
 |---|---|---|---|
 | Desenvolvimento / defesa | 1–2 runs/semana | só 2024 | **~US$ 6–18** |
-| Operação diária | 22 runs/mês | 2023–2024 | **~US$ 33–84** |
+| Operação diária | 22 runs/mês | 2023–2024 | **~US$ 39–111** |
 
 ---
 
@@ -125,12 +128,12 @@ acionar quality Silver + append de quarentena (se houver rejeições).
 | Componente | Estimativa mensal (US$) |
 |---|---|
 | Armazenamento S3 (Bronze IA + Silver + Gold + quarentena) | 1 – 3 |
-| Batch Serverless (Bronze + Silver + Gold, com quality) | 33 – 84 |
+| Batch Serverless (Bronze + Silver + Gold, com quality) | 39 – 111 |
 | Streaming micro-batch (cenário A — acadêmico) | 5 – 14 |
 | Kafka EC2 (opcional) | ~15 |
 | CloudWatch + SNS (incl. métricas de qualidade) | 1 – 4 |
 | BigQuery (fonte, filtrado por ano) | &lt; 1 |
-| **Total estimado** | **~US$ 55 – 120 / mês** |
+| **Total estimado** | **~US$ 60 – 150 / mês** |
 
 ### Comparativo de cenários
 

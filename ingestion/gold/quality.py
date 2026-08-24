@@ -234,6 +234,30 @@ def validate_indicador_uf(
     )
 
 
+def validate_contexto_territorio(
+    contexto: pd.DataFrame,
+    municipio: pd.DataFrame,
+) -> GoldQualityResult:
+    """Territorial FK checks for the municipal feature store."""
+    return validate_indicator(
+        contexto,
+        "contexto_territorio",
+        {"municipio": municipio},
+    )
+
+
+def validate_alunos_features(
+    features: pd.DataFrame,
+    municipio: pd.DataFrame,
+) -> GoldQualityResult:
+    """Label range and territorial FK checks for the student feature table."""
+    return validate_indicator(
+        features,
+        "alunos_features",
+        {"municipio": municipio},
+    )
+
+
 def log_meta_coverage_warning(
     indicator: pd.DataFrame,
     *,

@@ -56,8 +56,11 @@ flowchart LR
 | `meta_municipio` | Meta Alfabetização — Município | Indicador | `ano` | `...meta_alfabetizacao_municipio` | Completo |
 | `uf` | Unidades Federativas | Referência | — | `br_bd_diretorios_brasil.uf` | Completo |
 | `municipio` | Municípios | Referência | — | `br_bd_diretorios_brasil.municipio` | Completo |
-| `municipio_indicadores` | Município — Indicadores da Avaliação | Indicador | `ano` | `...alfabetizacao.municipio` | Completo (não ingerido) |
-| `uf_indicadores` | UF — Indicadores da Avaliação | Indicador | `ano` | `...alfabetizacao.uf` | Completo (não ingerido) |
+| `populacao_municipio` | População — Município | Indicador | `ano` | `br_ibge_populacao.municipio` | Completo |
+| `pib_municipio` | PIB — Município | Indicador | `ano` | `br_ibge_pib.municipio` | Completo |
+| `socioeconomico_municipio` | Socioeconômico (AVS) | Indicador | `ano` | `br_ipea_avs.municipio` | Completo |
+| `municipio_indicadores` | Município — Indicadores da Avaliação | Indicador | `ano` | `...alfabetizacao.municipio` | Completo |
+| `uf_indicadores` | UF — Indicadores da Avaliação | Indicador | `ano` | `...alfabetizacao.uf` | Completo |
 
 Índice YAML: [`catalogo/entities/_index.yaml`](catalogo/entities/_index.yaml)
 

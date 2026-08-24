@@ -13,6 +13,7 @@ class TestPrepareAlunosSilverBatch:
             {
                 "ano": [2024, 2024],
                 "id_aluno": ["A1", "A1"],
+                "serie": ["2º ano", "2º ano"],
                 "id_municipio": ["3550308", "3550308"],
                 "rede": [" Municipal ", " Municipal "],
                 "alfabetizado": ["Sim", "Sim"],
@@ -44,6 +45,8 @@ class TestPrepareAlunosSilverBatch:
         assert result.iloc[0]["_silver_processed_at"] == "2026-06-16T12:00:00+00:00"
         assert "_ingestion_timestamp" in result.columns
         assert "_silver_ingestion_mode" not in result.columns
+        assert "serie" in result.columns
+        assert result.iloc[0]["serie"] == "2º ano"
 
         for col in (
             "_kafka_partition",

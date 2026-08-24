@@ -73,6 +73,23 @@ class TestQueryBuilding:
         query = source_instances["uf"].build_query()
         assert "ano IN" not in query
 
+    def test_year_lookback_expands_population_filter(self, source_instances):
+        query = source_instances["populacao_municipio"].build_query()
+        assert "ano IN (2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024)" in query
+        assert "populacao" in query
+        assert "*" not in query.split("FROM")[0]
+
+    def test_socioeconomico_skips_year_filter(self, source_instances):
+        query = source_instances["socioeconomico_municipio"].build_query()
+        assert "ano IN" not in query
+        assert "ivs" in query
+
+    def test_municipio_indicadores_lookback_one_year(self, source_instances):
+        query = source_instances["municipio_indicadores"].build_query()
+        assert "ano IN (2022, 2023, 2024)" in query
+        assert "municipio_indicadores" not in query
+        assert "br_inep_avaliacao_alfabetizacao.municipio" in query
+
     def test_row_limit_applied(self, source_instances):
         query = source_instances["meta_municipio"].build_query()
         assert "LIMIT 1000" in query

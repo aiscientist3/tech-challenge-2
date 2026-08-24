@@ -230,7 +230,7 @@ Bronze read → standardize_common → deduplicate → apply_enrichment → vali
 
 ### Ordem de processamento das entidades
 
-Mantida a ordem em `ALL_ENTITY_NAMES`: `uf` e `municipio` primeiro (referências para FK e enriquecimento de `meta_*` e `alunos`).
+Mantida a ordem em `ALL_ENTITY_NAMES`: `uf` e `municipio` primeiro (referências para FK), depois metas, população/PIB/AVS, indicadores INEP e `alunos`.
 
 ### Métricas
 
@@ -278,6 +278,7 @@ Validação **após** `build_indicador_municipio` / `build_indicador_uf`, **ante
 | `gold_taxa_faixa`             | `taxa_crianca_alfabetizada` entre 0 e 100                            |
 | `gold_referencia_territorial` | `id_municipio` ou `sigla_uf` existe na referência Silver `municipio` |
 | `gold_meta_ausente`           | `taxa_alfabetizacao` (INEP oficial) ausente após join com meta       |
+| `gold_alfabetizado_faixa`     | `alunos_features.alfabetizado` entre 0 e 1                           |
 
 
 Indicadores inconsistentes vão para `quarantine/.../gold/{dataset}`; apenas `valid_df` é publicado no Gold.
@@ -359,7 +360,7 @@ python -m pytest tests/ -q
 | Suite                                | Cenários                                                             |
 | ------------------------------------ | -------------------------------------------------------------------- |
 | `tests/silver/test_quality.py`       | Completude, domínio, FK, regras do YAML                              |
-| `tests/gold/test_quality.py`         | Faixa de taxa, referência territorial, meta ausente (log), UF válido |
+| `tests/gold/test_quality.py`         | Faixa de taxa, referência territorial, meta ausente (log), UF válido, rótulo ML |
 | `tests/streaming/test_bronze_dlq.py` | Envelope/payload inválido, chaves naturais ausentes                  |
 
 
@@ -409,7 +410,7 @@ Eventos Kafka malformados são **rejeitados no parse** (`expand_kafka_microbatch
 `prepare_alunos_silver_batch()` aplica `standardize_common` → `deduplicate` →
 metadados Silver → **projeção de colunas** (`project_alunos_for_silver`): remove
 linhagem Kafka/evento (`_kafka_*`, `_event_*`) e colunas Bronze-only (`caderno`,
-`id_escola`, etc.), mantendo só o subset quality/Gold.
+`id_escola`, etc.), mantendo o subset quality/Gold — inclusive `serie`.
 
 Catálogo Gold em `docs/catalog/gold/` — tipos suportados: `faixa`, `referencial`.
 

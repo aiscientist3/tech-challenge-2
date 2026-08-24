@@ -22,9 +22,8 @@ entity:
   classificacao: Publica
   observacao: >
     Tabela basedosdados.br_inep_avaliacao_alfabetizacao.municipio.
-    O pipeline batch ingere br_bd_diretorios_brasil.municipio (referência
-    territorial) no path bronze/.../municipio/. Esta tabela de indicadores
-    não está no pipeline atual.
+    O pipeline batch ingere esta tabela em bronze/.../municipio_indicadores/
+    (indicadores da avaliação). Distinta de br_bd_diretorios_brasil.municipio.
 
 governanca:
   data_owner:
@@ -52,13 +51,18 @@ destino:
     coluna: ano
     tipo: hive_style
   caminho_relativo: bronze/br_inep_alfabetizacao/municipio_indicadores/
-  observacao: Path sugerido — entidade ainda não ingerida pelo pipeline batch
+  caminho_exemplo: s3://{bucket}/bronze/br_inep_alfabetizacao/municipio_indicadores/ano=2023/
 
 ingestao:
-  no_pipeline: true
+  pipeline: ingestion/batch/main.py
+  source_code: ingestion/batch/sources/municipio_indicadores.py
+  filtro_ano: true
+  year_lookback: 1
+  modo_escrita: overwrite
+  colunas_origem: SELECT enxuto (ano, território, série, rede, taxa, média LP, níveis 0–8)
   observacao: >
-    Pipeline atual grava br_bd_diretorios_brasil.municipio em
-    bronze/.../municipio/. Inclusão desta tabela é evolução futura.
+    Gold usa estes indicadores defasados em 1 ano (anti-leakage). 2023 fica nulo
+    se não houver 2022 na fonte.
 
 chaves:
   candidata_negocio:
@@ -198,6 +202,15 @@ qualidade:
       tipo: completude
       coluna: ano
       descricao: Coluna ano não deve ser nula
+    - id: municipio_ind_id_formato
+      tipo: dominio
+      coluna: id_municipio
+      descricao: ID município com 7 dígitos numéricos
+    - id: municipio_ind_fk
+      tipo: referencial
+      coluna: id_municipio
+      referencia: municipio.id_municipio
+      descricao: id_municipio deve existir na tabela municipio
     - id: municipio_ind_chave_unica
       tipo: unicidade
       colunas: [ano, id_municipio, serie, rede]
@@ -205,15 +218,17 @@ qualidade:
     - id: municipio_ind_proporcoes_soma
       tipo: consistencia
       descricao: Soma das proporções por nível (0–8) deve aproximar 100% quando aplicável
-  status_implementacao: documentado
+  status_implementacao: implementado
 
 lineage:
   upstream:
     - basedosdados.br_inep_avaliacao_alfabetizacao.municipio
-  downstream_planejado:
+  downstream:
     - silver.municipio_indicadores
+    - gold.contexto_territorio
+    - gold.alunos_features
 
 contrato_dados:
-  frequencia_carga: nao_ingerido
+  frequencia_carga: conforme agendamento Databricks Job
   anos_suportados: [2023, 2024]
   sla_freshness: a_definir

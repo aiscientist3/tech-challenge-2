@@ -52,8 +52,8 @@ destino:
   silver:
     caminho_relativo: silver/br_inep_alfabetizacao/alunos/
     projecao: >
-      Silver materializa apenas colunas de negócio para qualidade/Gold
-      (ano, id_aluno, id_municipio, rede, alfabetizado, proficiencia, peso_aluno)
+      Silver materializa colunas de negócio para qualidade/Gold
+      (ano, id_aluno, id_municipio, rede, serie, alfabetizado, proficiencia, peso_aluno)
       + auditoria mínima (_ingestion_timestamp, _silver_*).
       Linhagem Kafka/evento permanece só na Bronze.
 
@@ -122,7 +122,7 @@ colunas:
     descricao: Ano escolar
     chave: false
     pii: false
-    camada: bronze_only
+    camada: bronze_e_silver
 
   - nome: rede
     tipo: STRING
@@ -235,6 +235,7 @@ lineage:
     - silver.alunos
     - gold.indicador_crianca_alfabetizada_municipio
     - gold.indicador_crianca_alfabetizada_uf
+    - gold.alunos_features
 
 contrato_dados:
   frequencia_carga: job streaming Databricks (AvailableNow) + producer sob demanda
