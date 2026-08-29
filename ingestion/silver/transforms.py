@@ -5,12 +5,34 @@ Silver layer transformations — standardisation, deduplication and territorial 
 from __future__ import annotations
 
 import logging
+import unicodedata
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 _MISSING_STRINGS = {"", "nan", "none", "null", "<na>"}
+
+# INEP / Base dos Dados administrative dependence codes → canonical labels.
+REDE_CODE_MAP: dict[str, str] = {
+    "1": "federal",
+    "2": "estadual",
+    "3": "municipal",
+    "4": "privada",
+    "5": "publica",
+}
+
+REDE_CANONICAL: frozenset[str] = frozenset(
+    {"municipal", "estadual", "federal", "privada", "publica"}
+)
+
+
+def _strip_accents(value: str) -> str:
+    return "".join(
+        char
+        for char in unicodedata.normalize("NFKD", value)
+        if not unicodedata.combining(char)
+    )
 
 
 def _normalise_string_series(series: pd.Series) -> pd.Series:
@@ -21,6 +43,38 @@ def _normalise_string_series(series: pd.Series) -> pd.Series:
     return stripped.mask(lowered.isin(_MISSING_STRINGS))
 
 
+def normalize_rede(series: pd.Series) -> pd.Series:
+    """
+    Standardise ``rede`` to canonical lowercase labels.
+
+    Maps INEP numeric codes (``2``/``3``/…) and accented labels (``pública``)
+    onto ``municipal`` | ``estadual`` | ``federal`` | ``privada`` | ``publica``.
+    """
+
+    def _one(value: object) -> object:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return pd.NA
+        text = str(value).strip()
+        if text == "" or text.lower() in _MISSING_STRINGS:
+            return pd.NA
+        # numeric-like: 3, 3.0, "3.0"
+        try:
+            as_float = float(text)
+            if as_float.is_integer():
+                text = str(int(as_float))
+        except ValueError:
+            pass
+
+        mapped = REDE_CODE_MAP.get(text)
+        if mapped is not None:
+            return mapped
+
+        label = _strip_accents(text).lower()
+        return label if label else pd.NA
+
+    return series.map(_one).astype("string")
+
+
 def standardize_common(df: pd.DataFrame) -> pd.DataFrame:
     """
     Apply cross-entity standardisation rules.
@@ -28,7 +82,7 @@ def standardize_common(df: pd.DataFrame) -> pd.DataFrame:
     - ``ano`` → nullable integer
     - ``id_municipio`` → 7-digit zero-padded string
     - ``sigla`` / ``sigla_uf`` → uppercase trimmed string
-    - ``rede`` → lowercase trimmed string
+    - ``rede`` → canonical lowercase label (codes mapped to text)
     """
     if df.empty:
         return df.copy()
@@ -51,8 +105,7 @@ def standardize_common(df: pd.DataFrame) -> pd.DataFrame:
             result[column] = normalised.str.upper()
 
     if "rede" in result.columns:
-        normalised = _normalise_string_series(result["rede"])
-        result["rede"] = normalised.str.lower()
+        result["rede"] = normalize_rede(result["rede"])
 
     return result
 

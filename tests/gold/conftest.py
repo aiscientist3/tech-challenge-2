@@ -22,6 +22,25 @@ def sample_alunos() -> pd.DataFrame:
 
 
 @pytest.fixture
+def sample_alunos_coded() -> pd.DataFrame:
+    """Same students with INEP numeric rede codes (as-is Silver)."""
+    return pd.DataFrame(
+        {
+            "ano": [2024, 2024, 2024, 2024],
+            "id_municipio": ["3550308", "3550308", "3304557", "3304557"],
+            "id_aluno": ["A1", "A2", "A3", "A4"],
+            "rede": ["3", "3", "2", "2"],
+            "alfabetizado": ["Sim", "Não", "Sim", "Sim"],
+            "peso_aluno": [1.0, 1.0, 2.0, 1.0],
+            "proficiencia": [800.0, 600.0, 750.0, 720.0],
+            "_ingestion_timestamp": ["2026-01-01T00:00:00+00:00"] * 4,
+            "_silver_processed_at": ["2026-01-02T00:00:00+00:00"] * 4,
+            "_silver_batch_id": ["silver-1"] * 4,
+        }
+    )
+
+
+@pytest.fixture
 def sample_meta_municipio() -> pd.DataFrame:
     return pd.DataFrame(
         {
@@ -33,6 +52,8 @@ def sample_meta_municipio() -> pd.DataFrame:
             "taxa_alfabetizacao": [55.0, 60.0],
             "meta_alfabetizacao_2024": [70.0, 75.0],
             "meta_alfabetizacao_2030": [100.0, 100.0],
+            "nivel_alfabetizacao": [2.0, 3.0],
+            "percentual_participacao": [90.0, 88.0],
         }
     )
 
@@ -42,7 +63,14 @@ def sample_municipio() -> pd.DataFrame:
     return pd.DataFrame(
         {
             "id_municipio": ["3550308", "3304557"],
+            "nome": ["São Paulo", "Rio de Janeiro"],
             "sigla_uf": ["SP", "RJ"],
+            "nome_uf": ["São Paulo", "Rio de Janeiro"],
+            "nome_regiao": ["Sudeste", "Sudeste"],
+            "capital_uf": [1.0, 1.0],
+            "nome_mesorregiao": ["Metropolitana de SP", "Metropolitana do RJ"],
+            "nome_microrregiao": ["São Paulo", "Rio de Janeiro"],
+            "amazonia_legal": [0, 0],
         }
     )
 
@@ -58,5 +86,41 @@ def sample_meta_uf() -> pd.DataFrame:
             "taxa_alfabetizacao": [58.0, 62.0],
             "meta_alfabetizacao_2024": [72.0, 78.0],
             "meta_alfabetizacao_2030": [100.0, 100.0],
+        }
+    )
+
+
+@pytest.fixture
+def sample_populacao() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "ano": [2020, 2020],
+            "id_municipio": ["3550308", "3304557"],
+            "populacao": [12_000_000, 6_000_000],
+        }
+    )
+
+
+@pytest.fixture
+def sample_pib() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "ano": [2021, 2021],
+            "id_municipio": ["3550308", "3304557"],
+            "pib": [700_000_000, 350_000_000],
+        }
+    )
+
+
+@pytest.fixture
+def sample_socioeconomico() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "ano": [2010, 2010],
+            "id_municipio": ["3550308", "3304557"],
+            "ivs": [0.4, 0.5],
+            "ivs_infraestrutura_urbana": [0.3, 0.4],
+            "ivs_capital_humano": [0.5, 0.6],
+            "ivs_renda_trabalho": [0.4, 0.5],
         }
     )

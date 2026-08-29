@@ -17,13 +17,26 @@ logger = logging.getLogger(__name__)
 
 _STRING_COLUMNS = frozenset(
     {
+        "id_aluno",
+        "id_escola",
         "id_municipio",
         "rede",
+        "serie",
         "sigla_uf",
         "nome_municipio",
         "nome_uf",
+        "nome_regiao",
+        "regiao_municipio",
+        "regiao_uf",
+        "nome_mesorregiao",
+        "nome_microrregiao",
         "_gold_processed_at",
         "_gold_batch_id",
+        "_ingestion_timestamp",
+        "_silver_processed_at",
+        "_silver_batch_id",
+        "_source_table",
+        "_batch_id",
     }
 )
 
@@ -35,7 +48,11 @@ def _prepare_for_delta(df: pd.DataFrame) -> pd.DataFrame:
     for column in output.columns:
         if column == "ano":
             output[column] = pd.to_numeric(output[column], errors="coerce").astype("Int64")
-        elif column in _STRING_COLUMNS:
+        elif column in _STRING_COLUMNS or pd.api.types.is_string_dtype(output[column]):
+            output[column] = output[column].astype("string")
+        elif pd.api.types.is_bool_dtype(output[column]):
+            continue
+        elif output[column].dtype == object:
             output[column] = output[column].astype("string")
         else:
             output[column] = pd.to_numeric(output[column], errors="coerce")

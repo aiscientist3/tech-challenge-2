@@ -1,9 +1,9 @@
 """
-Gold layer entry point — Silver → analytical indicators → Gold.
+Gold layer entry point — Silver → analytical / ML datasets → Gold.
 
 CLI usage:
   python -m ingestion.gold.main --datasets all --years 2023,2024
-  python -m ingestion.gold.main --datasets indicador_crianca_alfabetizada_municipio --years 2024
+  python -m ingestion.gold.main --datasets alunos_features,alunos_analytic --years 2024
 """
 
 from __future__ import annotations
@@ -14,6 +14,8 @@ import os
 import sys
 import uuid
 from typing import Any
+
+import pandas as pd
 
 from ingestion.batch.connections.aws_credentials import (
     resolve_aws_storage_options,
@@ -27,8 +29,15 @@ from ingestion.gold.config import (
     silver_table_path,
 )
 from ingestion.gold.gold_writer import GoldWriter
+from ingestion.gold.quality import assert_gold_contract
 from ingestion.gold.silver_reader import read_silver
-from ingestion.gold.transforms import build_indicador_municipio, build_indicador_uf
+from ingestion.gold.transforms import (
+    build_alunos_analytic,
+    build_alunos_features,
+    build_contexto_territorio,
+    build_indicador_municipio,
+    build_indicador_uf,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -112,7 +121,7 @@ def _parse_years(raw: str) -> list[int]:
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Gold layer — Silver Delta → analytical indicators on S3."
+        description="Gold layer — Silver Delta → analytical / ML datasets on S3."
     )
     parser.add_argument(
         "--datasets",
@@ -133,6 +142,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--append",
         action="store_true",
         help="Use append mode instead of overwrite.",
+    )
+    parser.add_argument(
+        "--skip-quality",
+        action="store_true",
+        help="Skip post-build Gold contract quality checks.",
     )
     return parser
 
@@ -171,7 +185,31 @@ def _resolve_bucket() -> str:
         raise
 
 
-def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
+def _read_silver_optional(
+    path: str,
+    storage_options: dict[str, str],
+    *,
+    years: list[int] | None = None,
+    partition_col: str | None = "ano",
+) -> pd.DataFrame:
+    """Read a Silver table; return empty frame when unavailable."""
+    try:
+        return read_silver(
+            path,
+            storage_options,
+            years=years,
+            partition_col=partition_col,
+        )
+    except Exception as exc:
+        logger.warning("Optional Silver table unavailable at %s: %s", path, exc)
+        return pd.DataFrame()
+
+
+def run_gold(
+    run_config: GoldRunConfig,
+    *,
+    skip_quality: bool = False,
+) -> dict[str, str | None]:
     batch_id = run_config.batch_id or str(uuid.uuid4())
     logger.info("=== GOLD PROCESSING STARTED ===")
     logger.info("Batch ID : %s", batch_id)
@@ -184,6 +222,18 @@ def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
     writer = GoldWriter(storage_options)
 
     logger.info("S3 bucket: %s", bucket)
+
+    needs_ml = any(
+        name in run_config.datasets
+        for name in ("contexto_territorio", "alunos_features", "alunos_analytic")
+    )
+    needs_indicadores = any(
+        name in run_config.datasets
+        for name in (
+            "indicador_crianca_alfabetizada_municipio",
+            "indicador_crianca_alfabetizada_uf",
+        )
+    )
 
     logger.info("Loading Silver reference tables...")
     alunos = read_silver(
@@ -208,11 +258,102 @@ def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
         partition_col=None,
     )
 
+    populacao = pd.DataFrame()
+    pib = pd.DataFrame()
+    socioeconomico = pd.DataFrame()
+    if needs_ml:
+        populacao = _read_silver_optional(
+            silver_table_path(bucket, "populacao_municipio"),
+            storage_options,
+            years=None,
+        )
+        pib = _read_silver_optional(
+            silver_table_path(bucket, "pib_municipio"),
+            storage_options,
+            years=None,
+        )
+        socioeconomico = _read_silver_optional(
+            silver_table_path(bucket, "socioeconomico_municipio"),
+            storage_options,
+            years=None,
+        )
+
     results: dict[str, str | None] = {}
+    contexto = pd.DataFrame()
+    alunos_features = pd.DataFrame()
+
+    if needs_ml or "contexto_territorio" in run_config.datasets:
+        logger.info("--- Building contexto_territorio ---")
+        contexto = build_contexto_territorio(
+            meta_municipio,
+            municipio,
+            alunos=alunos,
+            populacao=populacao,
+            pib=pib,
+            socioeconomico=socioeconomico,
+        )
+        if "contexto_territorio" in run_config.datasets:
+            if not skip_quality:
+                assert_gold_contract("contexto_territorio", contexto)
+            results["contexto_territorio"] = writer.write(
+                contexto,
+                gold_configs["contexto_territorio"],
+                batch_id=batch_id,
+                overwrite=run_config.overwrite,
+            )
+
+    if "alunos_features" in run_config.datasets or "alunos_analytic" in run_config.datasets:
+        logger.info("--- Building alunos_features ---")
+        if contexto.empty:
+            contexto = build_contexto_territorio(
+                meta_municipio,
+                municipio,
+                alunos=alunos,
+                populacao=populacao,
+                pib=pib,
+                socioeconomico=socioeconomico,
+            )
+        alunos_features = build_alunos_features(alunos, contexto)
+        if "alunos_features" in run_config.datasets:
+            if not skip_quality:
+                assert_gold_contract("alunos_features", alunos_features)
+            results["alunos_features"] = writer.write(
+                alunos_features,
+                gold_configs["alunos_features"],
+                batch_id=batch_id,
+                overwrite=run_config.overwrite,
+            )
+
+    if "alunos_analytic" in run_config.datasets:
+        logger.info("--- Building alunos_analytic ---")
+        if alunos_features.empty:
+            if contexto.empty:
+                contexto = build_contexto_territorio(
+                    meta_municipio,
+                    municipio,
+                    alunos=alunos,
+                    populacao=populacao,
+                    pib=pib,
+                    socioeconomico=socioeconomico,
+                )
+            alunos_features = build_alunos_features(alunos, contexto)
+        analytic = build_alunos_analytic(alunos_features)
+        if not skip_quality:
+            assert_gold_contract("alunos_analytic", analytic)
+        results["alunos_analytic"] = writer.write(
+            analytic,
+            gold_configs["alunos_analytic"],
+            batch_id=batch_id,
+            overwrite=run_config.overwrite,
+        )
 
     if "indicador_crianca_alfabetizada_municipio" in run_config.datasets:
         logger.info("--- Building indicador_crianca_alfabetizada_municipio ---")
         indicador_mun = build_indicador_municipio(alunos, meta_municipio)
+        if not skip_quality:
+            assert_gold_contract(
+                "indicador_crianca_alfabetizada_municipio", indicador_mun
+            )
         results["indicador_crianca_alfabetizada_municipio"] = writer.write(
             indicador_mun,
             gold_configs["indicador_crianca_alfabetizada_municipio"],
@@ -223,12 +364,17 @@ def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
     if "indicador_crianca_alfabetizada_uf" in run_config.datasets:
         logger.info("--- Building indicador_crianca_alfabetizada_uf ---")
         indicador_uf = build_indicador_uf(alunos, municipio, meta_uf)
+        if not skip_quality:
+            assert_gold_contract("indicador_crianca_alfabetizada_uf", indicador_uf)
         results["indicador_crianca_alfabetizada_uf"] = writer.write(
             indicador_uf,
             gold_configs["indicador_crianca_alfabetizada_uf"],
             batch_id=batch_id,
             overwrite=run_config.overwrite,
         )
+
+    if not needs_indicadores and not needs_ml:
+        logger.warning("No datasets selected.")
 
     logger.info("=== GOLD PROCESSING COMPLETED ===")
     return results
@@ -251,7 +397,7 @@ def main() -> None:
     if not run_config.batch_id:
         run_config.batch_id = str(uuid.uuid4())
 
-    run_gold(run_config)
+    run_gold(run_config, skip_quality=args.skip_quality)
 
 
 if __name__ == "__main__":

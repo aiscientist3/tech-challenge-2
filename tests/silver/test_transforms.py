@@ -30,6 +30,20 @@ def test_standardize_sigla_and_rede() -> None:
     assert result["rede"].tolist() == ["municipal", "estadual"]
 
 
+def test_standardize_rede_maps_inep_codes() -> None:
+    df = pd.DataFrame({"rede": ["3", 2, "2.0", "1", "4", "Pública", "municipal"]})
+    result = standardize_common(df)
+    assert result["rede"].tolist() == [
+        "municipal",
+        "estadual",
+        "estadual",
+        "federal",
+        "privada",
+        "publica",
+        "municipal",
+    ]
+
+
 def test_deduplicate_keeps_latest_ingestion() -> None:
     df = pd.DataFrame(
         {

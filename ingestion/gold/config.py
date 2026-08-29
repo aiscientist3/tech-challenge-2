@@ -1,7 +1,7 @@
 """
 Centralised configuration for the Gold layer pipeline.
 
-Reads Silver Delta tables from S3 and builds analytical datasets ready for BI.
+Reads Silver Delta tables from S3 and builds analytical datasets ready for BI/ML.
 """
 
 from __future__ import annotations
@@ -18,6 +18,9 @@ DEFAULT_YEARS: list[int] = [2023, 2024]
 META_GOAL_YEARS: tuple[int, ...] = tuple(range(2024, 2031))
 
 ALL_DATASET_NAMES: tuple[str, ...] = (
+    "contexto_territorio",
+    "alunos_features",
+    "alunos_analytic",
     "indicador_crianca_alfabetizada_municipio",
     "indicador_crianca_alfabetizada_uf",
 )
@@ -43,6 +46,32 @@ def build_gold_configs(
         return f"s3://{bucket}/{gold_prefix}/{dataset_name}"
 
     return {
+        "contexto_territorio": GoldDatasetConfig(
+            name="contexto_territorio",
+            gold_path=gold_path("contexto_territorio"),
+            partition_by="ano",
+            description=(
+                "Contexto territorial e socioeconômico por município×rede×ano, "
+                "com rede padronizada."
+            ),
+        ),
+        "alunos_features": GoldDatasetConfig(
+            name="alunos_features",
+            gold_path=gold_path("alunos_features"),
+            partition_by="ano",
+            description=(
+                "Fato de aluno com contexto materializado "
+                "(join ano+id_municipio+rede) e target alfabetizado."
+            ),
+        ),
+        "alunos_analytic": GoldDatasetConfig(
+            name="alunos_analytic",
+            gold_path=gold_path("alunos_analytic"),
+            partition_by="ano",
+            description=(
+                "Visão ML: alunos_features sem colunas de pipeline/leakage."
+            ),
+        ),
         "indicador_crianca_alfabetizada_municipio": GoldDatasetConfig(
             name="indicador_crianca_alfabetizada_municipio",
             gold_path=gold_path("indicador_crianca_alfabetizada_municipio"),
