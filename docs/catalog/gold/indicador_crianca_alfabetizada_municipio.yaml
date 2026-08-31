@@ -1,0 +1,26 @@
+# Catálogo de qualidade — Gold: indicador Criança Alfabetizada por município
+
+version: "1.0"
+dataset:
+  id: indicador_crianca_alfabetizada_municipio
+  camada: gold
+  descricao: >
+    Indicador agregado por município e rede, com validação cross-table antes
+    da publicação analítica.
+
+qualidade:
+  regras:
+    - id: gold_taxa_faixa
+      tipo: faixa
+      coluna: taxa_crianca_alfabetizada
+      min: 0
+      max: 100
+      descricao: Taxa calculada deve estar entre 0 e 100
+
+    - id: gold_referencia_territorial
+      tipo: referencial
+      coluna: id_municipio
+      referencia: municipio.id_municipio
+      descricao: id_municipio deve existir na referência Silver municipio
+
+  status_implementacao: implementado

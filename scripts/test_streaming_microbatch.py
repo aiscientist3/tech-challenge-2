@@ -28,7 +28,6 @@ from ingestion.batch.connections.aws_credentials import (
 )
 from ingestion.streaming.bronze_stream_writer import merge_upsert_to_bronze
 from ingestion.streaming.config import (
-    ALUNOS_BRONZE_MERGE_KEYS,
     ALUNOS_BRONZE_PARTITION_BY,
     alunos_silver_path,
     bronze_table_path,
@@ -51,11 +50,9 @@ def _sample_microbatch() -> pd.DataFrame:
                 "proficiencia": 850.0,
                 "peso_aluno": 1.0,
                 "_event_id": str(uuid.uuid4()),
-                "_event_type": "performance_measurement",
-                "_event_timestamp": ts,
+                "_kafka_partition": 0,
+                "_kafka_offset": 0,
                 "_ingestion_timestamp": ts,
-                "_ingestion_mode": "stream",
-                "_stream_sink": "kafka",
             }
         ]
     )
@@ -68,7 +65,7 @@ def main() -> None:
     silver_path = alunos_silver_path(bucket)
     pdf = _sample_microbatch()
 
-    print(f"=== Streaming micro-batch test ===")
+    print("=== Streaming micro-batch test ===")
     print(f"Bucket      : {bucket}")
     print(f"Bronze path : {bronze_path}")
     print(f"Silver path : {silver_path}")
@@ -78,17 +75,16 @@ def main() -> None:
         pdf,
         bronze_path=bronze_path,
         storage_options=storage_options,
-        merge_keys=ALUNOS_BRONZE_MERGE_KEYS,
         partition_by=ALUNOS_BRONZE_PARTITION_BY,
     )
-    print(f"Bronze MERGE: {bronze_rows} row(s)")
+    print(f"Bronze upsert: {bronze_rows} row(s)")
 
     silver_rows = process_bronze_to_silver_microbatch(
         pdf,
         silver_path=silver_path,
         storage_options=storage_options,
     )
-    print(f"Silver MERGE: {silver_rows} row(s)")
+    print(f"Silver upsert: {silver_rows} row(s)")
 
     silver_df = DeltaTable(silver_path, storage_options=storage_options).to_pandas()
     match = silver_df[silver_df["id_aluno"] == TEST_ID_ALUNO]
@@ -96,12 +92,12 @@ def main() -> None:
         raise SystemExit("FAIL: test aluno not found in Silver table.")
 
     row = match.iloc[0]
-    assert row["_silver_ingestion_mode"] == "stream"
-    assert row["_silver_stream_sink"] == "bronze"
     assert row["rede"] == "municipal"
+    assert "_silver_processed_at" in match.columns
+    assert "_kafka_offset" not in match.columns
 
-    print("OK: Silver row found with streaming metadata:")
-    print(f"  id_aluno={row['id_aluno']}, rede={row['rede']}, mode={row['_silver_ingestion_mode']}")
+    print("OK: Silver row found with lean streaming metadata:")
+    print(f"  id_aluno={row['id_aluno']}, rede={row['rede']}")
     print("=== TEST PASSED ===")
 
 

@@ -1,64 +1,129 @@
-"""Unit tests for Gold contract quality checks."""
+"""Unit tests for Gold layer cross-table quality checks (lean mode)."""
 
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
 from ingestion.gold.quality import (
-    GoldContractError,
-    assert_gold_contract,
-    validate_gold_contract,
+    load_gold_quality_rules,
+    log_meta_coverage_warning,
+    validate_alunos_features,
+    validate_indicador_municipio,
+    validate_indicador_uf,
 )
 
 
-def test_validate_accepts_canonical_rede_and_id() -> None:
-    df = pd.DataFrame(
+def _municipio_ref() -> pd.DataFrame:
+    return pd.DataFrame(
         {
             "id_municipio": ["3550308", "3304557"],
-            "rede": ["municipal", "estadual"],
-            "nome_municipio": ["São Paulo", "Rio de Janeiro"],
-            "alfabetizado": [1.0, 0.0],
-            "_join_match": [True, True],
+            "sigla_uf": ["SP", "RJ"],
         }
     )
-    assert validate_gold_contract("alunos_features", df) == []
 
 
-def test_validate_rejects_numeric_rede() -> None:
-    df = pd.DataFrame(
-        {
-            "id_municipio": ["3550308"],
-            "rede": ["3"],
-            "alfabetizado": [1.0],
-            "_join_match": [True],
-        }
-    )
-    errors = validate_gold_contract("alunos_features", df)
-    assert any("rede" in message for message in errors)
+class TestLoadGoldQualityRules:
+    def test_loads_municipio_active_rules(self) -> None:
+        rules = load_gold_quality_rules("indicador_crianca_alfabetizada_municipio")
+        rule_ids = {rule.id for rule in rules}
+        assert rule_ids == {"gold_taxa_faixa", "gold_referencia_territorial"}
+
+    def test_loads_alunos_features_rules(self) -> None:
+        rules = load_gold_quality_rules("alunos_features")
+        rule_ids = {rule.id for rule in rules}
+        assert rule_ids == {"gold_alfabetizado_faixa", "gold_referencia_territorial"}
 
 
-def test_validate_rejects_short_id_municipio() -> None:
-    df = pd.DataFrame(
-        {
-            "id_municipio": ["123"],
-            "rede": ["municipal"],
-            "alfabetizado": [1.0],
-            "_join_match": [True],
-        }
-    )
-    errors = validate_gold_contract("alunos_features", df)
-    assert any("id_municipio" in message for message in errors)
+class TestGoldQuality:
+    def test_quarantines_rate_out_of_range(self) -> None:
+        indicator = pd.DataFrame(
+            {
+                "ano": [2024],
+                "id_municipio": ["3550308"],
+                "rede": ["municipal"],
+                "taxa_crianca_alfabetizada": [120.0],
+                "taxa_alfabetizacao": [80.0],
+            }
+        )
+        result = validate_indicador_municipio(
+            indicator,
+            meta_municipio=pd.DataFrame(),
+            municipio=_municipio_ref(),
+        )
+        assert result.quarantine_count == 1
+        assert result.summary["gold_taxa_faixa"] == 1
 
+    def test_quarantines_unknown_municipio(self) -> None:
+        indicator = pd.DataFrame(
+            {
+                "ano": [2024],
+                "id_municipio": ["9999999"],
+                "rede": ["municipal"],
+                "taxa_crianca_alfabetizada": [75.0],
+                "taxa_alfabetizacao": [70.0],
+            }
+        )
+        result = validate_indicador_municipio(
+            indicator,
+            meta_municipio=pd.DataFrame(),
+            municipio=_municipio_ref(),
+        )
+        assert result.quarantine_count == 1
+        assert result.summary["gold_referencia_territorial"] == 1
 
-def test_assert_raises_on_low_join_coverage() -> None:
-    df = pd.DataFrame(
-        {
-            "id_municipio": ["3550308"] * 10,
-            "rede": ["municipal"] * 10,
-            "alfabetizado": [1.0] * 10,
-            "_join_match": [True] + [False] * 9,
-        }
-    )
-    with pytest.raises(GoldContractError):
-        assert_gold_contract("alunos_features", df)
+    def test_missing_meta_rate_logs_only_not_quarantine(self, caplog) -> None:
+        import logging
+
+        indicator = pd.DataFrame(
+            {
+                "ano": [2024],
+                "id_municipio": ["3550308"],
+                "rede": ["municipal"],
+                "taxa_crianca_alfabetizada": [75.0],
+                "taxa_alfabetizacao": [None],
+            }
+        )
+        with caplog.at_level(logging.WARNING):
+            log_meta_coverage_warning(
+                indicator,
+                dataset_name="indicador_crianca_alfabetizada_municipio",
+            )
+            result = validate_indicador_municipio(
+                indicator,
+                meta_municipio=pd.DataFrame(),
+                municipio=_municipio_ref(),
+            )
+        assert result.quarantine_count == 0
+        assert "without official INEP rate" in caplog.text
+
+    def test_valid_uf_indicator_passes(self) -> None:
+        indicator = pd.DataFrame(
+            {
+                "ano": [2024],
+                "sigla_uf": ["SP"],
+                "rede": ["municipal"],
+                "taxa_crianca_alfabetizada": [75.0],
+                "taxa_alfabetizacao": [70.0],
+            }
+        )
+        result = validate_indicador_uf(
+            indicator,
+            meta_uf=pd.DataFrame(),
+            municipio=_municipio_ref(),
+        )
+        assert result.quarantine_count == 0
+        assert len(result.valid_df) == 1
+
+    def test_quarantines_alunos_features_label_out_of_range(self) -> None:
+        features = pd.DataFrame(
+            {
+                "ano": [2024],
+                "id_aluno": ["A1"],
+                "id_municipio": ["3550308"],
+                "rede": ["municipal"],
+                "alfabetizado": [2.0],
+            }
+        )
+        result = validate_alunos_features(features, _municipio_ref())
+        assert result.quarantine_count == 1
+        assert result.summary["gold_alfabetizado_faixa"] == 1

@@ -186,18 +186,16 @@ qualidade:
       tipo: completude
       coluna: ano
       descricao: Coluna ano não deve ser nula
-    - id: meta_municipio_chave_unica
-      tipo: unicidade
-      colunas: [ano, id_municipio, rede]
-      descricao: Combinação ano + município + rede deve ser única por carga
     - id: meta_municipio_id_municipio_formato
       tipo: dominio
       coluna: id_municipio
       descricao: ID município com 7 dígitos numéricos
-    - id: meta_municipio_taxas_faixa
-      tipo: dominio
-      descricao: Taxa de alfabetização, metas e percentual de participação entre 0 e 100
-  status_implementacao: documentado
+    - id: meta_municipio_fk
+      tipo: referencial
+      coluna: id_municipio
+      referencia: municipio.id_municipio
+      descricao: id_municipio deve existir na tabela municipio
+  status_implementacao: implementado
 
 lineage:
   upstream:

@@ -8,8 +8,16 @@ from ingestion.silver.transforms import (
     deduplicate,
     enrich_meta_municipio,
     enrich_meta_uf,
+    project_alunos_for_silver,
     standardize_common,
 )
+
+
+def test_standardize_renames_uppercase_pib() -> None:
+    df = pd.DataFrame({"PIB": [100.0], "id_municipio": ["3550308"]})
+    result = standardize_common(df)
+    assert "pib" in result.columns
+    assert "PIB" not in result.columns
 
 
 def test_standardize_id_municipio_zero_pads_to_seven_digits() -> None:
@@ -95,3 +103,28 @@ def test_enrich_meta_municipio_preserves_unmatched_rows(
     assert result.iloc[0]["nome_municipio"] == "São Paulo"
     assert pd.isna(result.iloc[1]["nome_municipio"])
     assert bool(result.iloc[1]["_join_match"]) is False
+
+
+def test_project_alunos_keeps_serie_and_drops_bronze_only() -> None:
+    df = pd.DataFrame(
+        {
+            "ano": [2024],
+            "id_aluno": ["A1"],
+            "id_municipio": ["3550308"],
+            "rede": ["municipal"],
+            "serie": ["2º ano"],
+            "alfabetizado": ["Sim"],
+            "proficiencia": [800.0],
+            "peso_aluno": [1.0],
+            "caderno": ["X"],
+            "id_escola": ["E1"],
+            "_kafka_offset": [1],
+            "_ingestion_timestamp": ["2026-01-01T00:00:00+00:00"],
+        }
+    )
+    result = project_alunos_for_silver(df)
+    assert "serie" in result.columns
+    assert result.iloc[0]["serie"] == "2º ano"
+    assert "caderno" not in result.columns
+    assert "id_escola" not in result.columns
+    assert "_kafka_offset" not in result.columns

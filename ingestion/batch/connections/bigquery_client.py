@@ -17,6 +17,7 @@ from typing import Any, Optional
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
+from ingestion.common.dbutils import get_dbutils
 from ingestion.batch.config import (
     DATABRICKS_SECRET_KEY,
     DATABRICKS_SECRET_SCOPE,
@@ -26,29 +27,9 @@ from ingestion.batch.config import (
 logger = logging.getLogger(__name__)
 
 
-def _get_dbutils() -> Any | None:
-    """Return Databricks dbutils if running inside a Databricks cluster."""
-    try:
-        from pyspark.dbutils import DBUtils  # type: ignore[import-untyped]
-        from pyspark.sql import SparkSession
-
-        spark = SparkSession.getActiveSession()
-        if spark is not None:
-            return DBUtils(spark)
-    except (ImportError, AttributeError, RuntimeError):
-        pass
-
-    try:
-        import IPython  # type: ignore[import-untyped]
-
-        return IPython.get_ipython().user_ns.get("dbutils")
-    except Exception:
-        return None
-
-
 def _credentials_from_databricks_secrets() -> service_account.Credentials | None:
     """Load service account JSON from the configured Databricks Secret Scope."""
-    dbutils = _get_dbutils()
+    dbutils = get_dbutils()
     if dbutils is None:
         return None
 
@@ -88,7 +69,7 @@ def _credentials_from_env() -> service_account.Credentials | None:
 
 def _resolve_gcp_project_id() -> str | None:
     """Resolve GCP project ID from Databricks Secrets or environment variable."""
-    dbutils = _get_dbutils()
+    dbutils = get_dbutils()
     if dbutils is not None:
         try:
             project_id = dbutils.secrets.get(

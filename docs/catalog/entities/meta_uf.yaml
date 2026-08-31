@@ -180,14 +180,12 @@ qualidade:
       tipo: completude
       coluna: ano
       descricao: Coluna ano não deve ser nula
-    - id: meta_uf_chave_unica
-      tipo: unicidade
-      colunas: [ano, sigla_uf, rede]
-      descricao: Combinação ano + UF + rede deve ser única por carga
-    - id: meta_uf_taxas_faixa
-      tipo: dominio
-      descricao: Taxa de alfabetização, metas e percentual de participação entre 0 e 100
-  status_implementacao: documentado
+    - id: meta_uf_sigla_fk
+      tipo: referencial
+      coluna: sigla_uf
+      referencia: uf.sigla
+      descricao: sigla_uf deve existir na tabela uf
+  status_implementacao: implementado
 
 lineage:
   upstream:

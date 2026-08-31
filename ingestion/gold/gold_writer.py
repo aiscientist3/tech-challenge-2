@@ -17,28 +17,34 @@ logger = logging.getLogger(__name__)
 
 _STRING_COLUMNS = frozenset(
     {
-        "id_aluno",
-        "id_escola",
         "id_municipio",
+        "id_aluno",
         "rede",
         "serie",
         "sigla_uf",
         "nome_municipio",
         "nome_uf",
         "nome_regiao",
-        "regiao_municipio",
         "regiao_uf",
+        "regiao_municipio",
         "nome_mesorregiao",
         "nome_microrregiao",
         "_gold_processed_at",
         "_gold_batch_id",
-        "_ingestion_timestamp",
-        "_silver_processed_at",
-        "_silver_batch_id",
-        "_source_table",
-        "_batch_id",
+        "_quality_rule_ids",
+        "_quality_messages",
     }
 )
+
+
+def _is_string_column(name: str) -> bool:
+    if name in _STRING_COLUMNS or name.startswith(("_gold_", "_quality_")):
+        return True
+    if name.startswith(("nome_", "id_")):
+        return True
+    if "regiao" in name:
+        return True
+    return False
 
 
 def _prepare_for_delta(df: pd.DataFrame) -> pd.DataFrame:
@@ -48,14 +54,18 @@ def _prepare_for_delta(df: pd.DataFrame) -> pd.DataFrame:
     for column in output.columns:
         if column == "ano":
             output[column] = pd.to_numeric(output[column], errors="coerce").astype("Int64")
-        elif column in _STRING_COLUMNS or pd.api.types.is_string_dtype(output[column]):
-            output[column] = output[column].astype("string")
-        elif pd.api.types.is_bool_dtype(output[column]):
-            continue
-        elif output[column].dtype == object:
+        elif _is_string_column(column):
             output[column] = output[column].astype("string")
         else:
-            output[column] = pd.to_numeric(output[column], errors="coerce")
+            original = output[column]
+            numeric = pd.to_numeric(original, errors="coerce")
+            if original.dtype == object or pd.api.types.is_string_dtype(original):
+                non_null = int(original.notna().sum())
+                numeric_ok = int(numeric.notna().sum())
+                if non_null > 0 and numeric_ok < non_null:
+                    output[column] = original.astype("string")
+                    continue
+            output[column] = numeric
 
     return output
 

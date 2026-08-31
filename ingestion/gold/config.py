@@ -1,7 +1,8 @@
 """
 Centralised configuration for the Gold layer pipeline.
 
-Reads Silver Delta tables from S3 and builds analytical datasets ready for BI/ML.
+Reads Silver Delta tables from S3 and builds analytical datasets ready for BI
+and supervised modelling (student-level features).
 """
 
 from __future__ import annotations
@@ -18,11 +19,26 @@ DEFAULT_YEARS: list[int] = [2023, 2024]
 META_GOAL_YEARS: tuple[int, ...] = tuple(range(2024, 2031))
 
 ALL_DATASET_NAMES: tuple[str, ...] = (
+    "indicador_crianca_alfabetizada_municipio",
+    "indicador_crianca_alfabetizada_uf",
     "contexto_territorio",
     "alunos_features",
     "alunos_analytic",
-    "indicador_crianca_alfabetizada_municipio",
-    "indicador_crianca_alfabetizada_uf",
+)
+
+# Same-year outcome columns that must not be used as ML features.
+LEAKAGE_FEATURE_COLUMNS: tuple[str, ...] = (
+    "proficiencia",
+    "taxa_alfabetizacao",
+    "uf_taxa_alfabetizacao",
+    "brasil_taxa_alfabetizacao",
+    "percentual_participacao",
+    "uf_percentual_participacao",
+    "brasil_percentual_participacao",
+    "media_portugues",
+    "taxa_crianca_alfabetizada",
+    "gap_taxa_vs_inep",
+    *(f"proporcao_aluno_nivel_{level}" for level in range(9)),
 )
 
 
@@ -46,32 +62,6 @@ def build_gold_configs(
         return f"s3://{bucket}/{gold_prefix}/{dataset_name}"
 
     return {
-        "contexto_territorio": GoldDatasetConfig(
-            name="contexto_territorio",
-            gold_path=gold_path("contexto_territorio"),
-            partition_by="ano",
-            description=(
-                "Contexto territorial e socioeconômico por município×rede×ano, "
-                "com rede padronizada."
-            ),
-        ),
-        "alunos_features": GoldDatasetConfig(
-            name="alunos_features",
-            gold_path=gold_path("alunos_features"),
-            partition_by="ano",
-            description=(
-                "Fato de aluno com contexto materializado "
-                "(join ano+id_municipio+rede) e target alfabetizado."
-            ),
-        ),
-        "alunos_analytic": GoldDatasetConfig(
-            name="alunos_analytic",
-            gold_path=gold_path("alunos_analytic"),
-            partition_by="ano",
-            description=(
-                "Visão ML: alunos_features sem colunas de pipeline/leakage."
-            ),
-        ),
         "indicador_crianca_alfabetizada_municipio": GoldDatasetConfig(
             name="indicador_crianca_alfabetizada_municipio",
             gold_path=gold_path("indicador_crianca_alfabetizada_municipio"),
@@ -88,6 +78,32 @@ def build_gold_configs(
             description=(
                 "Indicador Criança Alfabetizada por UF e rede, "
                 "com gap vs metas INEP."
+            ),
+        ),
+        "contexto_territorio": GoldDatasetConfig(
+            name="contexto_territorio",
+            gold_path=gold_path("contexto_territorio"),
+            partition_by="ano",
+            description=(
+                "Feature store municipal (ano + município + rede): metas, "
+                "território, população, PIB, socioeconômico e INEP defasado."
+            ),
+        ),
+        "alunos_features": GoldDatasetConfig(
+            name="alunos_features",
+            gold_path=gold_path("alunos_features"),
+            partition_by="ano",
+            description=(
+                "Microdados de aluno com rótulo alfabetizado e contexto "
+                "territorial/socioeconômico — sem leakage de proficiência."
+            ),
+        ),
+        "alunos_analytic": GoldDatasetConfig(
+            name="alunos_analytic",
+            gold_path=gold_path("alunos_analytic"),
+            partition_by="ano",
+            description=(
+                "Visão ML de alunos_features sem colunas de pipeline/leakage."
             ),
         ),
     }

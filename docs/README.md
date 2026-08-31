@@ -4,6 +4,8 @@ Catálogo das entidades ingeridas na **camada Bronze** do pipeline de alfabetiza
 
 Metadados estruturados ficam em [`docs/catalogo/`](catalogo/).
 
+Estimativa de custos (FinOps): [`finops-estimativa-custos.md`](finops-estimativa-custos.md).
+
 ---
 
 ## Governança
@@ -54,8 +56,11 @@ flowchart LR
 | `meta_municipio` | Meta Alfabetização — Município | Indicador | `ano` | `...meta_alfabetizacao_municipio` | Completo |
 | `uf` | Unidades Federativas | Referência | — | `br_bd_diretorios_brasil.uf` | Completo |
 | `municipio` | Municípios | Referência | — | `br_bd_diretorios_brasil.municipio` | Completo |
-| `municipio_indicadores` | Município — Indicadores da Avaliação | Indicador | `ano` | `...alfabetizacao.municipio` | Completo (não ingerido) |
-| `uf_indicadores` | UF — Indicadores da Avaliação | Indicador | `ano` | `...alfabetizacao.uf` | Completo (não ingerido) |
+| `populacao_municipio` | População — Município | Indicador | `ano` | `br_ibge_populacao.municipio` | Completo |
+| `pib_municipio` | PIB — Município | Indicador | `ano` | `br_ibge_pib.municipio` | Completo |
+| `socioeconomico_municipio` | Socioeconômico (AVS) | Indicador | `ano` | `br_ipea_avs.municipio` | Completo |
+| `municipio_indicadores` | Município — Indicadores da Avaliação | Indicador | `ano` | `...alfabetizacao.municipio` | Completo |
+| `uf_indicadores` | UF — Indicadores da Avaliação | Indicador | `ano` | `...alfabetizacao.uf` | Completo |
 
 Índice YAML: [`catalogo/entities/_index.yaml`](catalogo/entities/_index.yaml)
 
@@ -77,22 +82,24 @@ Implementação: [`ingestion/batch/bronze_writer.py`](../ingestion/batch/bronze_
 
 ## Entidade: `alunos`
 
-**Arquivo YAML:** [`catalogo/entities/alunos.yaml`](catalogo/entities/alunos.yaml)
+**Arquivo YAML:** [`catalog/entities/alunos.yaml`](catalog/entities/alunos.yaml)
 
 ### Resumo
 
 Microdados em nível de aluno da Avaliação da Alfabetização. Inclui o indicador **alfabetizado**, **proficiência** (escala SAEB) e **peso amostral**. Granularidade: **1 linha por aluno por ano**.
+
+> **Ingestão:** somente **streaming** (BigQuery → Kafka producer → Databricks consumer). Não há source batch `alunos.py`.
 
 ### Origem e destino
 
 | | |
 |---|---|
 | **Fonte** | `basedosdados.br_inep_avaliacao_alfabetizacao.alunos` |
-| **Destino** | `s3://{bucket}/bronze/br_inep_alfabetizacao/alunos/ano={ano}/` |
+| **Destino Bronze** | `s3://{bucket}/bronze/br_inep_alfabetizacao/alunos/ano={ano}/` (MERGE) |
+| **Destino Silver** | `s3://{bucket}/silver/br_inep_alfabetizacao/alunos/` (MERGE + projeção) |
 | **Formato** | Delta Lake |
 | **Período histórico** | 2023–2024 |
-| **Volume estimado** | Milhões de linhas por ano [a confirmar] |
-| **Crescimento anual** | Proporcional ao número de alunos avaliados por ano [a confirmar] |
+| **Pipeline** | `ingestion/streaming/kafka/main.py` + `producer/alunos_simulator.py` |
 
 ### Schema de negócio
 

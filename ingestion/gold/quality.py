@@ -1,102 +1,278 @@
 """
-Gold contract quality checks — rede, id_municipio and join coverage.
+Gold layer cross-table quality checks — rules driven by docs/catalog/gold/*.yaml.
+
+Supported rule types: faixa, referencial.
 """
 
 from __future__ import annotations
 
 import logging
-import re
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
-from ingestion.silver.transforms import REDE_CANONICAL
+from ingestion.common.quality_referential import referencial_failure_mask
 
 logger = logging.getLogger(__name__)
 
-_ID_MUNICIPIO_RE = re.compile(r"^\d{7}$")
+_CATALOG_DIR = Path(__file__).resolve().parents[2] / "docs" / "catalog" / "gold"
 
-# Minimum join coverage for alunos_features before failing the Gold job.
-MIN_JOIN_COVERAGE = 0.80
-
-
-class GoldContractError(ValueError):
-    """Raised when a Gold dataset violates the published contract."""
+_OFFICIAL_RATE_COL = "taxa_alfabetizacao"
 
 
-def _check_rede(df: pd.DataFrame, dataset: str) -> list[str]:
-    if "rede" not in df.columns or df.empty:
+@dataclass(frozen=True)
+class GoldQualityRule:
+    """Single quality rule loaded from Gold catalog YAML."""
+
+    id: str
+    tipo: str
+    descricao: str
+    coluna: str | None = None
+    min_value: float | None = None
+    max_value: float | None = None
+    referencia_tabela: str | None = None
+    referencia_coluna: str | None = None
+
+
+@dataclass
+class GoldQualityResult:
+    """Outcome of validating a Gold indicator DataFrame."""
+
+    valid_df: pd.DataFrame
+    quarantine_df: pd.DataFrame
+    summary: dict[str, int] = field(default_factory=dict)
+    total_input: int = 0
+    quarantine_count: int = 0
+
+
+def _parse_rule(raw: dict[str, Any]) -> GoldQualityRule:
+    referencia = raw.get("referencia")
+    referencia_tabela = None
+    referencia_coluna = None
+    if isinstance(referencia, str) and "." in referencia:
+        referencia_tabela, referencia_coluna = referencia.split(".", 1)
+
+    return GoldQualityRule(
+        id=str(raw["id"]),
+        tipo=str(raw["tipo"]),
+        descricao=str(raw.get("descricao", "")),
+        coluna=raw.get("coluna"),
+        min_value=raw.get("min"),
+        max_value=raw.get("max"),
+        referencia_tabela=referencia_tabela,
+        referencia_coluna=referencia_coluna,
+    )
+
+
+def load_gold_quality_rules(dataset_name: str) -> list[GoldQualityRule]:
+    """Load quality rules from docs/catalog/gold/{dataset_name}.yaml."""
+    path = _CATALOG_DIR / f"{dataset_name}.yaml"
+    if not path.is_file():
+        logger.warning("Gold quality catalog not found for '%s' at %s", dataset_name, path)
         return []
-    values = set(df["rede"].dropna().astype(str).str.lower().unique())
-    invalid = sorted(values - set(REDE_CANONICAL))
-    if invalid:
-        return [
-            f"{dataset}: rede has non-canonical values {invalid}. "
-            f"Expected subset of {sorted(REDE_CANONICAL)}."
-        ]
-    # codes that slipped through
-    if any(v.isdigit() for v in values):
-        return [f"{dataset}: rede still contains numeric codes {sorted(values)}."]
-    return []
+
+    try:
+        import yaml
+    except ImportError as exc:
+        raise ImportError(
+            "PyYAML is required for Gold quality rule loading. Install with: pip install pyyaml"
+        ) from exc
+
+    with path.open(encoding="utf-8") as handle:
+        document = yaml.safe_load(handle)
+
+    raw_rules = document.get("qualidade", {}).get("regras", [])
+    return [_parse_rule(rule) for rule in raw_rules]
 
 
-def _check_id_municipio(df: pd.DataFrame, dataset: str) -> list[str]:
-    if "id_municipio" not in df.columns or df.empty:
-        return []
-    series = df["id_municipio"].dropna().astype(str)
-    bad = series[~series.str.match(_ID_MUNICIPIO_RE)]
-    if len(bad):
-        sample = bad.head(5).tolist()
-        return [
-            f"{dataset}: id_municipio must be 7-digit strings "
-            f"({len(bad)} invalid, e.g. {sample})."
-        ]
-    return []
+def _faixa_mask(df: pd.DataFrame, rule: GoldQualityRule) -> pd.Series:
+    if not rule.coluna or rule.coluna not in df.columns:
+        return pd.Series(False, index=df.index)
+
+    numeric = pd.to_numeric(df[rule.coluna], errors="coerce")
+    present = numeric.notna()
+    min_value = 0.0 if rule.min_value is None else float(rule.min_value)
+    max_value = 100.0 if rule.max_value is None else float(rule.max_value)
+    return present & ((numeric < min_value) | (numeric > max_value))
 
 
-def _check_join_coverage(df: pd.DataFrame, dataset: str) -> list[str]:
-    if dataset != "alunos_features" or df.empty:
-        return []
-    if "_join_match" in df.columns:
-        coverage = float(df["_join_match"].fillna(False).mean())
-    elif "nome_municipio" in df.columns:
-        coverage = float(df["nome_municipio"].notna().mean())
-    else:
-        return [f"{dataset}: cannot evaluate join coverage (missing _join_match)."]
+def _referencial_mask(
+    df: pd.DataFrame,
+    rule: GoldQualityRule,
+    references: dict[str, pd.DataFrame],
+) -> pd.Series:
+    if not rule.coluna or not rule.referencia_tabela or not rule.referencia_coluna:
+        return pd.Series(False, index=df.index)
 
-    if coverage < MIN_JOIN_COVERAGE:
-        return [
-            f"{dataset}: aluno→contexto join coverage {coverage:.1%} "
-            f"below minimum {MIN_JOIN_COVERAGE:.0%}."
-        ]
-    return []
-
-
-def _check_target(df: pd.DataFrame, dataset: str) -> list[str]:
-    if dataset not in {"alunos_features", "alunos_analytic"}:
-        return []
-    if "alfabetizado" not in df.columns:
-        return [f"{dataset}: missing target column 'alfabetizado'."]
-    return []
+    return referencial_failure_mask(
+        df,
+        entity_col=rule.coluna,
+        ref_table=rule.referencia_tabela,
+        ref_col=rule.referencia_coluna,
+        references=references,
+        rule_id=rule.id,
+        logger=logger,
+    )
 
 
-def validate_gold_contract(dataset: str, df: pd.DataFrame) -> list[str]:
-    """Return a list of contract violations (empty means OK)."""
-    if df.empty:
-        return [f"{dataset}: DataFrame is empty."]
+def _rule_failure_mask(
+    df: pd.DataFrame,
+    rule: GoldQualityRule,
+    references: dict[str, pd.DataFrame],
+) -> pd.Series:
+    if rule.tipo == "faixa":
+        return _faixa_mask(df, rule)
+    if rule.tipo == "referencial":
+        return _referencial_mask(df, rule, references)
+    logger.warning("Unknown Gold quality rule type '%s' for rule '%s'.", rule.tipo, rule.id)
+    return pd.Series(False, index=df.index)
 
-    errors: list[str] = []
-    errors.extend(_check_rede(df, dataset))
-    errors.extend(_check_id_municipio(df, dataset))
-    errors.extend(_check_join_coverage(df, dataset))
-    errors.extend(_check_target(df, dataset))
-    return errors
+
+def _attach_quarantine_metadata(
+    df: pd.DataFrame,
+    rule_ids: list[str],
+    messages: list[str],
+) -> pd.DataFrame:
+    output = df.copy()
+    output["_quality_rule_ids"] = ",".join(rule_ids)
+    output["_quality_messages"] = " | ".join(messages)
+    output["_quarantined_at"] = datetime.now(timezone.utc).isoformat()
+    return output.reset_index(drop=True)
 
 
-def assert_gold_contract(dataset: str, df: pd.DataFrame) -> None:
-    """Raise ``GoldContractError`` when the dataset violates the contract."""
-    errors = validate_gold_contract(dataset, df)
-    if errors:
-        for message in errors:
-            logger.error("Gold contract violation: %s", message)
-        raise GoldContractError("; ".join(errors))
-    logger.info("Gold contract OK for '%s' (%d rows).", dataset, len(df))
+def validate_indicator(
+    indicator: pd.DataFrame,
+    dataset_name: str,
+    references: dict[str, pd.DataFrame],
+) -> GoldQualityResult:
+    """Validate a Gold indicator using catalog rules and split valid vs quarantine."""
+    if indicator.empty:
+        return GoldQualityResult(
+            valid_df=indicator.copy(),
+            quarantine_df=indicator.copy(),
+            summary={},
+            total_input=0,
+            quarantine_count=0,
+        )
+
+    rules = load_gold_quality_rules(dataset_name)
+    failure_mask = pd.Series(False, index=indicator.index)
+    rule_ids_by_index: dict[Any, list[str]] = {idx: [] for idx in indicator.index}
+    messages_by_index: dict[Any, list[str]] = {idx: [] for idx in indicator.index}
+    summary: dict[str, int] = {}
+
+    for rule in rules:
+        fails = _rule_failure_mask(indicator, rule, references)
+        count = int(fails.sum())
+        summary[rule.id] = count
+        failure_mask |= fails
+        for idx in indicator.index[fails]:
+            rule_ids_by_index[idx].append(rule.id)
+            if rule.descricao:
+                messages_by_index[idx].append(rule.descricao)
+
+    valid_df = indicator.loc[~failure_mask].copy().reset_index(drop=True)
+    quarantine_parts: list[pd.DataFrame] = []
+    for idx in indicator.index[failure_mask]:
+        quarantine_parts.append(
+            _attach_quarantine_metadata(
+                indicator.loc[[idx]],
+                rule_ids_by_index[idx],
+                messages_by_index[idx],
+            )
+        )
+
+    quarantine_df = (
+        pd.concat(quarantine_parts, ignore_index=True)
+        if quarantine_parts
+        else pd.DataFrame()
+    )
+
+    result = GoldQualityResult(
+        valid_df=valid_df,
+        quarantine_df=quarantine_df,
+        summary=summary,
+        total_input=len(indicator),
+        quarantine_count=len(quarantine_df),
+    )
+    logger.info(
+        "Gold quality %s: %d quarantined / %d total (%s)",
+        dataset_name,
+        result.quarantine_count,
+        result.total_input,
+        ", ".join(f"{k}: {v}" for k, v in summary.items() if v > 0) or "no failures",
+    )
+    return result
+
+
+def validate_indicador_municipio(
+    indicator: pd.DataFrame,
+    meta_municipio: pd.DataFrame,
+    municipio: pd.DataFrame,
+) -> GoldQualityResult:
+    """Cross-table checks for the municipal Criança Alfabetizada indicator."""
+    return validate_indicator(
+        indicator,
+        "indicador_crianca_alfabetizada_municipio",
+        {"municipio": municipio, "meta_municipio": meta_municipio},
+    )
+
+
+def validate_indicador_uf(
+    indicator: pd.DataFrame,
+    meta_uf: pd.DataFrame,
+    municipio: pd.DataFrame,
+) -> GoldQualityResult:
+    """Cross-table checks for the UF-level Criança Alfabetizada indicator."""
+    return validate_indicator(
+        indicator,
+        "indicador_crianca_alfabetizada_uf",
+        {"municipio": municipio, "meta_uf": meta_uf},
+    )
+
+
+def validate_contexto_territorio(
+    contexto: pd.DataFrame,
+    municipio: pd.DataFrame,
+) -> GoldQualityResult:
+    """Territorial FK checks for the municipal feature store."""
+    return validate_indicator(
+        contexto,
+        "contexto_territorio",
+        {"municipio": municipio},
+    )
+
+
+def validate_alunos_features(
+    features: pd.DataFrame,
+    municipio: pd.DataFrame,
+) -> GoldQualityResult:
+    """Label range and territorial FK checks for the student feature table."""
+    return validate_indicator(
+        features,
+        "alunos_features",
+        {"municipio": municipio},
+    )
+
+
+def log_meta_coverage_warning(
+    indicator: pd.DataFrame,
+    *,
+    dataset_name: str,
+    official_rate_col: str = _OFFICIAL_RATE_COL,
+) -> None:
+    """Log rows missing official INEP rate (warning only, no quarantine)."""
+    if indicator.empty or official_rate_col not in indicator.columns:
+        return
+
+    missing = int(indicator[official_rate_col].isna().sum())
+    if missing > 0:
+        logger.warning(
+            "Gold %s: %d / %d rows without official INEP rate.",
+            dataset_name,
+            missing,
+            len(indicator),
+        )

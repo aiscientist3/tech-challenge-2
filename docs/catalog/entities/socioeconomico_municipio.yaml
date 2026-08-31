@@ -1,0 +1,133 @@
+# Catálogo de dados — entidade: socioeconomico_municipio
+# Camada Bronze | Atlas da Vulnerabilidade Social (IPEA)
+
+version: "1.0"
+status: completo
+
+entity:
+  id: socioeconomico_municipio
+  nome: Socioeconômico — Município
+  nome_tecnico: socioeconomico_municipio
+  descricao: >
+    Indicadores municipais do Atlas da Vulnerabilidade Social (IPEA). Snapshot
+    estrutural (cobertura típica 2000–2010); a Gold espalha o ano mais recente
+    por município para as coortes 2023–2024.
+  dominio_negocio: Metas INEP
+  tipo: indicador
+  granularidade: "1 linha por ano e município"
+  periodicidade: censitaria
+  contem_dado_pessoal: false
+  classificacao: Publica
+
+governanca:
+  data_owner:
+    nome: AI Scientist
+    email: aiscientist3@gmail.com
+  data_stewards:
+    - Samuel Porto
+    - Walter Ferreira
+    - Amanda Rarymi
+
+origem:
+  provedor: Base dos Dados
+  sistema: Google BigQuery
+  dataset: br_ipea_avs
+  tabela: municipio
+  tabela_completa: basedosdados.br_ipea_avs.municipio
+  documentacao:
+    - https://basedosdados.org/dataset/br-ipea-avs
+
+destino:
+  camada: bronze
+  formato: delta_lake
+  particionamento:
+    coluna: ano
+    tipo: hive_style
+  caminho_relativo: bronze/br_inep_alfabetizacao/socioeconomico_municipio/
+
+ingestao:
+  pipeline: ingestion/batch/main.py
+  source_code: ingestion/batch/sources/socioeconomico_municipio.py
+  filtro_ano: false
+  modo_escrita: overwrite
+  colunas_origem: ano, id_municipio, ivs, ivs_infraestrutura_urbana, ivs_capital_humano, ivs_renda_e_trabalho
+
+chaves:
+  candidata_negocio:
+    - ano
+    - id_municipio
+  estrangeiras_sugeridas:
+    - coluna: id_municipio
+      referencia: municipio.id_municipio
+      descricao: Vínculo territorial do município
+
+colunas:
+  - nome: ano
+    tipo: INTEGER
+    nullable: true
+    descricao: Ano do snapshot (tipicamente 2000 ou 2010)
+    chave: true
+    pii: false
+  - nome: id_municipio
+    tipo: STRING
+    nullable: true
+    descricao: ID município IBGE 7 dígitos
+    chave: true
+    pii: false
+  - nome: ivs
+    tipo: FLOAT
+    nullable: true
+    descricao: Índice de Vulnerabilidade Social (0 = menor, 1 = maior)
+    chave: false
+    pii: false
+    indicador_negocio: true
+  - nome: ivs_infraestrutura_urbana
+    tipo: FLOAT
+    nullable: true
+    descricao: Dimensão infraestrutura urbana do IVS
+    chave: false
+    pii: false
+    indicador_negocio: true
+  - nome: ivs_capital_humano
+    tipo: FLOAT
+    nullable: true
+    descricao: Dimensão capital humano do IVS
+    chave: false
+    pii: false
+    indicador_negocio: true
+  - nome: ivs_renda_e_trabalho
+    tipo: FLOAT
+    nullable: true
+    descricao: Dimensão renda e trabalho do IVS
+    chave: false
+    pii: false
+    indicador_negocio: true
+
+qualidade:
+  regras:
+    - id: socio_ano_obrigatorio
+      tipo: completude
+      coluna: ano
+      descricao: Coluna ano não deve ser nula
+    - id: socio_id_municipio_formato
+      tipo: dominio
+      coluna: id_municipio
+      descricao: ID município com 7 dígitos numéricos
+    - id: socio_fk
+      tipo: referencial
+      coluna: id_municipio
+      referencia: municipio.id_municipio
+      descricao: id_municipio deve existir na tabela municipio
+  status_implementacao: implementado
+
+lineage:
+  upstream:
+    - basedosdados.br_ipea_avs.municipio
+  downstream:
+    - silver.socioeconomico_municipio
+    - gold.contexto_territorio
+    - gold.alunos_features
+
+contrato_dados:
+  frequencia_carga: conforme agendamento Databricks Job
+  sla_freshness: a_definir

@@ -1,0 +1,20 @@
+# Catálogo de qualidade — Gold: contexto territorial municipal
+
+version: "1.0"
+dataset:
+  id: contexto_territorio
+  camada: gold
+  descricao: >
+    Feature store municipal (ano + município + rede) com metas, território,
+    população as-of, PIB, socioeconômico (AVS) e indicadores INEP defasados
+    em 1 ano.
+
+qualidade:
+  regras:
+    - id: gold_referencia_territorial
+      tipo: referencial
+      coluna: id_municipio
+      referencia: municipio.id_municipio
+      descricao: id_municipio deve existir na referência Silver municipio
+
+  status_implementacao: implementado

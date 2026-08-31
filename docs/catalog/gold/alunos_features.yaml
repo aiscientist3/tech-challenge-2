@@ -1,0 +1,27 @@
+# Catálogo de qualidade — Gold: features no grão do aluno
+
+version: "1.0"
+dataset:
+  id: alunos_features
+  camada: gold
+  descricao: >
+    Tabela analítica para modelo supervisionado: uma linha por aluno, rótulo
+    alfabetizado (0/1) e contexto territorial/socioeconômico. Não inclui
+    proficiencia nem taxas INEP do mesmo ano (anti-leakage).
+
+qualidade:
+  regras:
+    - id: gold_alfabetizado_faixa
+      tipo: faixa
+      coluna: alfabetizado
+      min: 0
+      max: 1
+      descricao: Rótulo alfabetizado deve ser 0 ou 1
+
+    - id: gold_referencia_territorial
+      tipo: referencial
+      coluna: id_municipio
+      referencia: municipio.id_municipio
+      descricao: id_municipio deve existir na referência Silver municipio
+
+  status_implementacao: implementado

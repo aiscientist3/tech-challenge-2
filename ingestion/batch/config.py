@@ -69,6 +69,11 @@ ALL_SOURCE_NAMES: tuple[str, ...] = (
     "meta_brasil",
     "meta_uf",
     "meta_municipio",
+    "populacao_municipio",
+    "pib_municipio",
+    "socioeconomico_municipio",
+    "municipio_indicadores",
+    "uf_indicadores",
 )
 
 
@@ -83,6 +88,7 @@ class SourceConfig:
     filter_by_year: bool = True
     required_columns: tuple[str, ...] = ()
     description: str = ""
+    year_lookback: int = 0
 
 
 def build_source_configs(
@@ -145,6 +151,55 @@ def build_source_configs(
             filter_by_year=True,
             required_columns=("ano",),
             description="Literacy target and indicator per municipality.",
+        ),
+        "populacao_municipio": SourceConfig(
+            name="populacao_municipio",
+            bq_table=f"{BIGQUERY_PUBLIC_DATASET}.br_ibge_populacao.municipio",
+            bronze_path=path("populacao_municipio"),
+            partition_by="ano",
+            filter_by_year=True,
+            year_lookback=10,
+            required_columns=("ano", "id_municipio", "populacao"),
+            description="IBGE municipal population estimates (as-of lookback for Gold).",
+        ),
+        "pib_municipio": SourceConfig(
+            name="pib_municipio",
+            bq_table=f"{BIGQUERY_PUBLIC_DATASET}.br_ibge_pib.municipio",
+            bronze_path=path("pib_municipio"),
+            partition_by="ano",
+            filter_by_year=True,
+            year_lookback=10,
+            required_columns=("ano", "id_municipio"),
+            description="IBGE municipal GDP (as-of lookback for Gold).",
+        ),
+        "socioeconomico_municipio": SourceConfig(
+            name="socioeconomico_municipio",
+            bq_table=f"{BIGQUERY_PUBLIC_DATASET}.br_ipea_avs.municipio",
+            bronze_path=path("socioeconomico_municipio"),
+            partition_by="ano",
+            filter_by_year=False,
+            required_columns=("ano", "id_municipio"),
+            description="IPEA Atlas da Vulnerabilidade Social (municipal snapshot).",
+        ),
+        "municipio_indicadores": SourceConfig(
+            name="municipio_indicadores",
+            bq_table=f"{BIGQUERY_PUBLIC_DATASET}.br_inep_avaliacao_alfabetizacao.municipio",
+            bronze_path=path("municipio_indicadores"),
+            partition_by="ano",
+            filter_by_year=True,
+            year_lookback=1,
+            required_columns=("ano", "id_municipio"),
+            description="INEP literacy assessment indicators per municipality (lagged in Gold).",
+        ),
+        "uf_indicadores": SourceConfig(
+            name="uf_indicadores",
+            bq_table=f"{BIGQUERY_PUBLIC_DATASET}.br_inep_avaliacao_alfabetizacao.uf",
+            bronze_path=path("uf_indicadores"),
+            partition_by="ano",
+            filter_by_year=True,
+            year_lookback=1,
+            required_columns=("ano", "sigla_uf"),
+            description="INEP literacy assessment indicators per UF (lagged in Gold).",
         ),
     }
 

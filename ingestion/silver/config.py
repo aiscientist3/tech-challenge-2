@@ -19,6 +19,9 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 BRONZE_PREFIX: str = os.getenv("BRONZE_PREFIX", "bronze/br_inep_alfabetizacao")
 SILVER_PREFIX: str = os.getenv("SILVER_PREFIX", "silver/br_inep_alfabetizacao")
+QUARANTINE_PREFIX: str = os.getenv(
+    "QUARANTINE_PREFIX", "quarantine/br_inep_alfabetizacao"
+)
 
 # ---------------------------------------------------------------------------
 # Runtime defaults
@@ -32,6 +35,11 @@ ALL_ENTITY_NAMES: tuple[str, ...] = (
     "meta_brasil",
     "meta_uf",
     "meta_municipio",
+    "populacao_municipio",
+    "pib_municipio",
+    "socioeconomico_municipio",
+    "municipio_indicadores",
+    "uf_indicadores",
     "alunos",
 )
 
@@ -42,6 +50,11 @@ NATURAL_KEYS: dict[str, tuple[str, ...]] = {
     "meta_brasil": ("ano", "rede"),
     "meta_uf": ("ano", "sigla_uf", "rede"),
     "meta_municipio": ("ano", "id_municipio", "rede"),
+    "populacao_municipio": ("ano", "id_municipio"),
+    "pib_municipio": ("ano", "id_municipio"),
+    "socioeconomico_municipio": ("ano", "id_municipio"),
+    "municipio_indicadores": ("ano", "id_municipio", "serie", "rede"),
+    "uf_indicadores": ("ano", "sigla_uf", "serie", "rede"),
     "alunos": ("ano", "id_aluno"),
 }
 
@@ -50,6 +63,16 @@ ENRICHMENT_JOINS: dict[str, tuple[str, str, str]] = {
     "meta_uf": ("uf", "sigla_uf", "sigla"),
     "meta_municipio": ("municipio", "id_municipio", "id_municipio"),
 }
+
+def quarantine_table_path(
+    bucket: str,
+    entity_name: str,
+    *,
+    layer: str = "silver",
+    quarantine_prefix: str = QUARANTINE_PREFIX,
+) -> str:
+    """S3 URI for quarantined rows (append-only Delta)."""
+    return f"s3://{bucket}/{quarantine_prefix}/{layer}/{entity_name}"
 
 
 @dataclass(frozen=True)
@@ -137,6 +160,51 @@ def build_entity_configs(
             natural_key=NATURAL_KEYS["meta_municipio"],
             enrichment_ref=enrichment_ref("meta_municipio"),
             description="Literacy target per municipality — enriched with territorial data.",
+        ),
+        "populacao_municipio": EntityConfig(
+            name="populacao_municipio",
+            bronze_path=bronze_path("populacao_municipio"),
+            silver_path=silver_path("populacao_municipio"),
+            partition_by="ano",
+            filter_by_year=False,
+            natural_key=NATURAL_KEYS["populacao_municipio"],
+            description="IBGE municipal population — kept with lookback years for as-of joins.",
+        ),
+        "pib_municipio": EntityConfig(
+            name="pib_municipio",
+            bronze_path=bronze_path("pib_municipio"),
+            silver_path=silver_path("pib_municipio"),
+            partition_by="ano",
+            filter_by_year=False,
+            natural_key=NATURAL_KEYS["pib_municipio"],
+            description="IBGE municipal GDP — kept with lookback years for as-of joins.",
+        ),
+        "socioeconomico_municipio": EntityConfig(
+            name="socioeconomico_municipio",
+            bronze_path=bronze_path("socioeconomico_municipio"),
+            silver_path=silver_path("socioeconomico_municipio"),
+            partition_by="ano",
+            filter_by_year=False,
+            natural_key=NATURAL_KEYS["socioeconomico_municipio"],
+            description="IPEA AVS municipal snapshot — latest year broadcast in Gold.",
+        ),
+        "municipio_indicadores": EntityConfig(
+            name="municipio_indicadores",
+            bronze_path=bronze_path("municipio_indicadores"),
+            silver_path=silver_path("municipio_indicadores"),
+            partition_by="ano",
+            filter_by_year=False,
+            natural_key=NATURAL_KEYS["municipio_indicadores"],
+            description="INEP municipal literacy indicators — lagged one year in Gold.",
+        ),
+        "uf_indicadores": EntityConfig(
+            name="uf_indicadores",
+            bronze_path=bronze_path("uf_indicadores"),
+            silver_path=silver_path("uf_indicadores"),
+            partition_by="ano",
+            filter_by_year=False,
+            natural_key=NATURAL_KEYS["uf_indicadores"],
+            description="INEP UF literacy indicators — lagged one year in Gold.",
         ),
         "alunos": EntityConfig(
             name="alunos",

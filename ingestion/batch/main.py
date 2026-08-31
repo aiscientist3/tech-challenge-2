@@ -19,8 +19,8 @@ import os
 import sys
 import time
 import uuid
-from typing import Any
 
+from ingestion.common.dbutils import get_dbutils
 from ingestion.batch.bronze_writer import BronzeWriter
 from ingestion.batch.config import (
     ALL_SOURCE_NAMES,
@@ -47,26 +47,6 @@ logger = logging.getLogger(__name__)
 # Databricks helpers
 # ---------------------------------------------------------------------------
 
-def _get_dbutils() -> Any | None:
-    """Return Databricks dbutils when running inside a cluster."""
-    try:
-        from pyspark.dbutils import DBUtils  # type: ignore[import-untyped]
-        from pyspark.sql import SparkSession
-
-        spark = SparkSession.getActiveSession()
-        if spark is not None:
-            return DBUtils(spark)
-    except Exception:
-        pass
-
-    try:
-        import IPython  # type: ignore[import-untyped]
-
-        return IPython.get_ipython().user_ns.get("dbutils")
-    except Exception:
-        return None
-
-
 def _cli_args_provided() -> bool:
     """Return True when explicit CLI flags were passed (Job or local invocation)."""
     argv = sys.argv[1:]
@@ -79,7 +59,7 @@ def _cli_args_provided() -> bool:
 
 def _config_from_widgets() -> IngestionRunConfig | None:
     """Build IngestionRunConfig from Databricks notebook widgets when defined."""
-    dbutils = _get_dbutils()
+    dbutils = get_dbutils()
     if dbutils is None:
         return None
 

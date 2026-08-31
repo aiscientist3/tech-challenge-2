@@ -89,6 +89,9 @@ def standardize_common(df: pd.DataFrame) -> pd.DataFrame:
 
     result = df.copy()
 
+    if "PIB" in result.columns and "pib" not in result.columns:
+        result = result.rename(columns={"PIB": "pib"})
+
     if "ano" in result.columns:
         result["ano"] = pd.to_numeric(result["ano"], errors="coerce").astype("Int64")
 
@@ -212,6 +215,9 @@ def enrich_meta_municipio(
         "nome_uf",
         "nome_regiao",
         "capital_uf",
+        "nome_mesorregiao",
+        "nome_microrregiao",
+        "amazonia_legal",
     )
     available_cols = [col for col in municipio_cols if col in municipio.columns]
     if "id_municipio" not in available_cols:
@@ -252,3 +258,52 @@ def apply_enrichment(
     if entity_name == "meta_municipio":
         return enrich_meta_municipio(df, references["municipio"])
     return df
+
+
+def project_alunos_for_silver(
+    df: pd.DataFrame,
+    *,
+    extra_keep: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    """
+    Column pruning for Silver ``alunos`` (FinOps / medallion).
+
+    Keeps business columns needed for quality + Gold, optional audit columns,
+    and any ``extra_keep`` (e.g. ``_silver_*`` metadata). Drops Kafka/event
+    lineage and unused source columns such as ``caderno``, ``id_escola``, etc.
+    """
+    from ingestion.streaming.config import (
+        ALUNOS_SILVER_AUDIT_COLUMNS,
+        ALUNOS_SILVER_BUSINESS_COLUMNS,
+        ALUNOS_SILVER_DROP_COLUMNS,
+        ALUNOS_SILVER_DROP_PREFIXES,
+    )
+
+    if df.empty:
+        return df.copy()
+
+    keep: list[str] = []
+    for col in (*ALUNOS_SILVER_BUSINESS_COLUMNS, *ALUNOS_SILVER_AUDIT_COLUMNS, *extra_keep):
+        if col in df.columns and col not in keep:
+            keep.append(col)
+
+    # Preserve already-attached Silver metadata columns if present.
+    for col in df.columns:
+        if col.startswith("_silver_") and col not in keep:
+            keep.append(col)
+
+    projected = df.loc[:, keep].copy()
+
+    drop_exact = [c for c in ALUNOS_SILVER_DROP_COLUMNS if c in projected.columns]
+    if drop_exact:
+        projected = projected.drop(columns=drop_exact)
+
+    drop_prefixed = [
+        c
+        for c in projected.columns
+        if any(c.startswith(prefix) for prefix in ALUNOS_SILVER_DROP_PREFIXES)
+    ]
+    if drop_prefixed:
+        projected = projected.drop(columns=drop_prefixed)
+
+    return projected

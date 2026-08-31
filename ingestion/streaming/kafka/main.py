@@ -106,6 +106,7 @@ def main() -> None:
         starting_offsets=args.starting_offsets,
         source_table=ALUNOS_BQ_TABLE,
         partition_by=ALUNOS_BRONZE_PARTITION_BY,
+        bucket=bucket,
     )
 
     logger.info("=== STREAMING INGESTION COMPLETED (BRONZE → SILVER) ===")

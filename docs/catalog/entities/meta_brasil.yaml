@@ -168,21 +168,16 @@ qualidade:
       tipo: completude
       coluna: ano
       descricao: Coluna ano não deve ser nula
-    - id: meta_brasil_chave_unica
-      tipo: unicidade
-      colunas: [ano, rede]
-      descricao: Combinação ano + rede deve ser única por carga
-    - id: meta_brasil_taxas_faixa
-      tipo: dominio
-      descricao: Taxa de alfabetização, metas e percentual de participação entre 0 e 100
-  status_implementacao: documentado
+  status_implementacao: implementado
 
 lineage:
   upstream:
     - basedosdados.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_brasil
-  downstream_planejado:
+  downstream:
     - silver.meta_brasil
-    - gold.indicador_crianca_alfabetizada
+    - gold.contexto_territorio
+    - gold.indicador_crianca_alfabetizada_municipio
+    - gold.indicador_crianca_alfabetizada_uf
 
 contrato_dados:
   frequencia_carga: conforme agendamento Databricks Job
