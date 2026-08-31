@@ -7,6 +7,7 @@ import pandas as pd
 from ingestion.gold.transforms import (
     add_gap_analysis,
     as_of_join,
+    build_alunos_analytic,
     build_alunos_features,
     build_contexto_territorio,
     build_indicador_municipio,
@@ -213,3 +214,44 @@ def test_alunos_features_drops_proficiencia_and_same_year_rate(
     assert sp["alfabetizado"] == 1.0
     assert sp["meta_alfabetizacao_2024"] == 70.0
     assert sp["nome_regiao"] == "Sudeste"
+
+
+def test_alunos_features_maps_rede_codes_for_join(
+    sample_meta_municipio: pd.DataFrame,
+    sample_meta_uf: pd.DataFrame,
+    sample_meta_brasil: pd.DataFrame,
+    sample_municipio: pd.DataFrame,
+) -> None:
+    alunos = pd.DataFrame(
+        {
+            "ano": [2024, 2024],
+            "id_municipio": ["3550308", "3304557"],
+            "id_aluno": ["A1", "A3"],
+            "serie": ["2º ano", "2º ano"],
+            "rede": ["3", "2"],
+            "alfabetizado": ["Sim", "Sim"],
+            "peso_aluno": [1.0, 1.0],
+            "proficiencia": [800.0, 750.0],
+        }
+    )
+    contexto = build_contexto_territorio(
+        meta_municipio=sample_meta_municipio,
+        meta_uf=sample_meta_uf,
+        meta_brasil=sample_meta_brasil,
+        municipio=sample_municipio,
+        populacao=pd.DataFrame(),
+        pib=pd.DataFrame(),
+        socioeconomico=pd.DataFrame(),
+        municipio_indicadores=pd.DataFrame(),
+        uf_indicadores=pd.DataFrame(),
+        alunos=alunos,
+    )
+    features = build_alunos_features(alunos, contexto)
+    assert set(features["rede"].tolist()) == {"municipal", "estadual"}
+    assert features["_join_match"].all()
+    assert features["nome_municipio"].notna().all()
+
+    analytic = build_alunos_analytic(features)
+    assert "alfabetizado" in analytic.columns
+    assert "proficiencia" not in analytic.columns
+    assert "_join_match" not in analytic.columns

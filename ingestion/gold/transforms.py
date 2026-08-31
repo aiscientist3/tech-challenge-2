@@ -12,6 +12,7 @@ import logging
 import pandas as pd
 
 from ingestion.gold.config import LEAKAGE_FEATURE_COLUMNS, META_GOAL_YEARS
+from ingestion.silver.transforms import standardize_common
 
 logger = logging.getLogger(__name__)
 
@@ -58,13 +59,37 @@ _SOCIO_VALUE_COLS: tuple[str, ...] = (
     "ivs_infraestrutura_urbana",
     "ivs_capital_humano",
     "ivs_renda_e_trabalho",
+    "ivs_renda_trabalho",
 )
+
+_JOIN_KEYS_MUNICIPIO: list[str] = ["ano", "id_municipio", "rede"]
+
+_PIPELINE_OR_LEAKAGE_ANALYTIC: frozenset[str] = frozenset(
+    {
+        "nivel_alfabetizacao",
+        "proficiencia",
+        "id_escola",
+        "serie",
+        "caderno",
+        "presenca",
+        "preenchimento_caderno",
+    }
+)
+
+
+def _standardize_keys(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply shared Silver key rules (rede codes → labels, id_municipio 7 digits)."""
+    if df.empty:
+        return df.copy()
+    return standardize_common(df)
 
 
 def normalize_alfabetizado_flag(series: pd.Series) -> pd.Series:
     """Map alfabetizado values to 0/1 floats."""
+    numeric = pd.to_numeric(series, errors="coerce")
     normalized = series.astype("string").str.strip().str.lower()
-    return normalized.isin(["sim", "1", "true", "s"]).astype(float)
+    from_label = normalized.isin(["sim", "1", "1.0", "true", "s"])
+    return ((numeric == 1) | from_label).astype(float)
 
 
 def _prepare_alunos_for_indicator(alunos: pd.DataFrame) -> pd.DataFrame:
@@ -72,7 +97,7 @@ def _prepare_alunos_for_indicator(alunos: pd.DataFrame) -> pd.DataFrame:
     if alunos.empty:
         return alunos.copy()
 
-    prepared = alunos.copy()
+    prepared = _standardize_keys(alunos)
     prepared["_alfabetizado_flag"] = normalize_alfabetizado_flag(
         prepared.get("alfabetizado", pd.Series(dtype="string"))
     )
@@ -143,6 +168,7 @@ def add_gap_analysis(
     if indicator.empty:
         return indicator.copy()
 
+    meta = _standardize_keys(meta)
     available_keys = [key for key in join_keys if key in meta.columns]
     meta_cols = [
         col
@@ -471,24 +497,47 @@ def build_contexto_territorio(
     socioeconomico: pd.DataFrame,
     municipio_indicadores: pd.DataFrame,
     uf_indicadores: pd.DataFrame,
+    alunos: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Build the municipal feature store used by BI and ``alunos_features``."""
-    if meta_municipio.empty:
+    meta = _standardize_keys(meta_municipio)
+    if meta.empty and (alunos is None or alunos.empty):
         logger.warning("Cannot build contexto_territorio: empty meta_municipio.")
         return pd.DataFrame()
 
-    contexto = meta_municipio.copy()
-    contexto = attach_territorio_municipio(contexto, municipio)
+    key_frames: list[pd.DataFrame] = []
+    if not meta.empty and set(_JOIN_KEYS_MUNICIPIO).issubset(meta.columns):
+        key_frames.append(meta[_JOIN_KEYS_MUNICIPIO].drop_duplicates())
+    if alunos is not None and not alunos.empty:
+        alunos_std = _standardize_keys(alunos)
+        if set(_JOIN_KEYS_MUNICIPIO).issubset(alunos_std.columns):
+            key_frames.append(alunos_std[_JOIN_KEYS_MUNICIPIO].drop_duplicates())
+
+    if not key_frames:
+        logger.warning("Cannot build contexto_territorio: no join keys available.")
+        return pd.DataFrame()
+
+    keys = pd.concat(key_frames, ignore_index=True).drop_duplicates()
+    keys = keys.dropna(subset=["id_municipio", "rede"])
+    contexto = keys.merge(meta, on=_JOIN_KEYS_MUNICIPIO, how="left") if not meta.empty else keys
+
+    contexto = attach_territorio_municipio(contexto, _standardize_keys(municipio))
     contexto = attach_prefixed_meta(
-        contexto, meta_uf, ["ano", "sigla_uf", "rede"], prefix="uf_"
+        contexto,
+        _standardize_keys(meta_uf),
+        ["ano", "sigla_uf", "rede"],
+        prefix="uf_",
     )
     contexto = attach_prefixed_meta(
-        contexto, meta_brasil, ["ano", "rede"], prefix="brasil_"
+        contexto,
+        _standardize_keys(meta_brasil),
+        ["ano", "rede"],
+        prefix="brasil_",
     )
 
     contexto = as_of_join(
         contexto,
-        populacao,
+        _standardize_keys(populacao),
         by="id_municipio",
         time_col="ano",
         value_cols=["populacao"],
@@ -496,7 +545,7 @@ def build_contexto_territorio(
     )
     contexto = as_of_join(
         contexto,
-        pib,
+        _standardize_keys(pib),
         by="id_municipio",
         time_col="ano",
         value_cols=["pib"],
@@ -508,17 +557,19 @@ def build_contexto_territorio(
         pop_num = pd.to_numeric(contexto["populacao"], errors="coerce")
         contexto["pib_per_capita"] = pib_num / pop_num.replace(0, pd.NA)
 
+    socio_std = _standardize_keys(socioeconomico)
+    socio_cols = [col for col in _SOCIO_VALUE_COLS if col in socio_std.columns]
     contexto = snapshot_join(
         contexto,
-        socioeconomico,
+        socio_std,
         by="id_municipio",
         time_col="ano",
-        value_cols=list(_SOCIO_VALUE_COLS),
+        value_cols=socio_cols,
         year_alias="socio_ano_ref",
     )
 
     lagged_mun = lag_indicators(
-        municipio_indicadores,
+        _standardize_keys(municipio_indicadores),
         group_keys=["ano", "id_municipio", "rede"],
     )
     if not lagged_mun.empty:
@@ -529,7 +580,7 @@ def build_contexto_territorio(
 
     if "sigla_uf" in contexto.columns:
         lagged_uf = lag_indicators(
-            uf_indicadores,
+            _standardize_keys(uf_indicadores),
             group_keys=["ano", "sigla_uf", "rede"],
             prefix="lag1_uf_",
         )
@@ -539,7 +590,13 @@ def build_contexto_territorio(
             ]
             contexto = contexto.merge(lagged_uf, on=lag_keys, how="left")
 
-    logger.info("contexto_territorio built: %d rows.", len(contexto))
+    logger.info(
+        "contexto_territorio built: %d rows | redes=%s",
+        len(contexto),
+        sorted(contexto["rede"].dropna().astype(str).unique().tolist())
+        if "rede" in contexto.columns
+        else [],
+    )
     return contexto
 
 
@@ -569,7 +626,7 @@ def build_alunos_features(
         logger.warning("No alunos rows for alunos_features.")
         return pd.DataFrame()
 
-    features = alunos.copy()
+    features = _standardize_keys(alunos)
     features["alfabetizado"] = normalize_alfabetizado_flag(
         features.get("alfabetizado", pd.Series(dtype="string"))
     )
@@ -580,12 +637,13 @@ def build_alunos_features(
 
     if contexto.empty:
         logger.warning("contexto_territorio is empty — alunos_features without context.")
+        features["_join_match"] = False
         return _drop_leakage_columns(features)
 
-    context_clean = _drop_leakage_columns(contexto)
+    context_clean = _drop_leakage_columns(_standardize_keys(contexto))
     join_keys = [
         key
-        for key in ["ano", "id_municipio", "rede"]
+        for key in _JOIN_KEYS_MUNICIPIO
         if key in features.columns and key in context_clean.columns
     ]
     overlap = [
@@ -597,7 +655,42 @@ def build_alunos_features(
         context_clean = context_clean.drop(columns=overlap)
 
     features = features.merge(context_clean, on=join_keys, how="left")
+    features["_join_match"] = (
+        features["nome_municipio"].notna()
+        if "nome_municipio" in features.columns
+        else False
+    )
     features = _drop_leakage_columns(features)
 
-    logger.info("alunos_features built: %d rows.", len(features))
+    coverage = float(features["_join_match"].mean()) if len(features) else 0.0
+    logger.info(
+        "alunos_features built: %d rows | join coverage=%.1f%%",
+        len(features),
+        coverage * 100.0,
+    )
+    if coverage < 0.80:
+        logger.warning(
+            "alunos→contexto join coverage below 80%% (%.1f%%). "
+            "Check rede standardisation and meta coverage.",
+            coverage * 100.0,
+        )
     return features
+
+
+def build_alunos_analytic(alunos_features: pd.DataFrame) -> pd.DataFrame:
+    """ML-ready view: target + features without pipeline metadata / leakage cols."""
+    if alunos_features.empty:
+        return pd.DataFrame()
+
+    drop_cols = [
+        col
+        for col in alunos_features.columns
+        if col in _PIPELINE_OR_LEAKAGE_ANALYTIC
+        or col.startswith("_")
+    ]
+    analytic = alunos_features.drop(columns=drop_cols, errors="ignore").copy()
+    if "alfabetizado" not in analytic.columns:
+        raise ValueError("alunos_analytic requires target column 'alfabetizado'.")
+
+    logger.info("alunos_analytic built: %d rows × %d cols", *analytic.shape)
+    return analytic.reset_index(drop=True)

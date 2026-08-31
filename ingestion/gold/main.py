@@ -43,6 +43,7 @@ from ingestion.gold.silver_reader import read_silver
 from ingestion.gold.transforms import (
     attach_prefixed_meta,
     attach_territorio_municipio,
+    build_alunos_analytic,
     build_alunos_features,
     build_contexto_territorio,
     build_indicador_municipio,
@@ -330,7 +331,7 @@ def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
     contexto = pd.DataFrame()
     need_contexto = any(
         name in run_config.datasets
-        for name in ("contexto_territorio", "alunos_features")
+        for name in ("contexto_territorio", "alunos_features", "alunos_analytic")
     )
     if need_contexto:
         logger.info("--- Building contexto_territorio ---")
@@ -344,6 +345,7 @@ def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
             socioeconomico=socioeconomico,
             municipio_indicadores=municipio_indicadores,
             uf_indicadores=uf_indicadores,
+            alunos=alunos,
         )
 
     if "contexto_territorio" in run_config.datasets:
@@ -362,13 +364,34 @@ def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
         )
         contexto = ctx_quality.valid_df
 
-    if "alunos_features" in run_config.datasets:
+    features = pd.DataFrame()
+    if "alunos_features" in run_config.datasets or "alunos_analytic" in run_config.datasets:
         logger.info("--- Building alunos_features ---")
         features = build_alunos_features(alunos, contexto)
-        feat_quality = validate_alunos_features(features, municipio)
+        if "alunos_features" in run_config.datasets:
+            feat_quality = validate_alunos_features(features, municipio)
+            _publish(
+                name="alunos_features",
+                quality=feat_quality,
+                writer=writer,
+                quarantine_writer=quarantine_writer,
+                gold_configs=gold_configs,
+                batch_id=batch_id,
+                overwrite=run_config.overwrite,
+                results=results,
+                quarantine_counts=quarantine_counts,
+                record_counts=record_counts,
+            )
+            features = feat_quality.valid_df
+
+    if "alunos_analytic" in run_config.datasets:
+        logger.info("--- Building alunos_analytic ---")
+        analytic = build_alunos_analytic(features)
+        # Analytic inherits territorial FK checks from the parent features table.
+        analytic_quality = validate_alunos_features(analytic, municipio)
         _publish(
-            name="alunos_features",
-            quality=feat_quality,
+            name="alunos_analytic",
+            quality=analytic_quality,
             writer=writer,
             quarantine_writer=quarantine_writer,
             gold_configs=gold_configs,

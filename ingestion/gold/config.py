@@ -23,6 +23,7 @@ ALL_DATASET_NAMES: tuple[str, ...] = (
     "indicador_crianca_alfabetizada_uf",
     "contexto_territorio",
     "alunos_features",
+    "alunos_analytic",
 )
 
 # Same-year outcome columns that must not be used as ML features.
@@ -95,6 +96,14 @@ def build_gold_configs(
             description=(
                 "Microdados de aluno com rótulo alfabetizado e contexto "
                 "territorial/socioeconômico — sem leakage de proficiência."
+            ),
+        ),
+        "alunos_analytic": GoldDatasetConfig(
+            name="alunos_analytic",
+            gold_path=gold_path("alunos_analytic"),
+            partition_by="ano",
+            description=(
+                "Visão ML de alunos_features sem colunas de pipeline/leakage."
             ),
         ),
     }
