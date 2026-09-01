@@ -115,14 +115,17 @@ class GoldWriter:
             len(output),
         )
 
-        write_deltalake(
-            table_or_uri=destination,
-            data=output,
-            mode=write_mode,
-            partition_by=partition_by,
-            storage_options=self.storage_options,
-            schema_mode="overwrite",
-        )
+        write_kwargs: dict = {
+            "table_or_uri": destination,
+            "data": output,
+            "mode": write_mode,
+            "partition_by": partition_by,
+            "storage_options": self.storage_options,
+        }
+        if write_mode == "overwrite":
+            write_kwargs["schema_mode"] = "overwrite"
+
+        write_deltalake(**write_kwargs)
 
         logger.info(
             "Gold write complete: '%s' — %d records at %s.",
