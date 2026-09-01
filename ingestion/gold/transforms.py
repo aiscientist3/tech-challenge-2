@@ -451,29 +451,44 @@ def as_of_join(
     right_sub[time_col] = pd.to_numeric(right_sub[time_col], errors="coerce")
     left_ok = left_ok.dropna(subset=[time_col])
     right_sub = right_sub.dropna(subset=[time_col])
-    left_ok[time_col] = left_ok[time_col].astype("int64")
-    right_sub[time_col] = right_sub[time_col].astype("int64")
-    left_ok[by] = left_ok[by].astype("string")
-    right_sub[by] = right_sub[by].astype("string")
-
     if left_ok.empty or right_sub.empty:
         return result.drop(columns=["_row_id"])
 
+    left_ok[time_col] = left_ok[time_col].astype("int64")
+    right_sub[time_col] = right_sub[time_col].astype("int64")
+    left_ok[by] = left_ok[by].astype(str)
+    right_sub[by] = right_sub[by].astype(str)
+
     right_sub = right_sub.rename(columns={time_col: right_time_alias})
-    # Drop placeholder columns so merge_asof can attach real values.
+    # Drop placeholder columns before the as-of attach.
     drop_placeholders = [
         col for col in [*present_values, right_time_alias] if col in left_ok.columns
     ]
     left_ok = left_ok.drop(columns=drop_placeholders)
 
-    merged = pd.merge_asof(
-        left_ok.sort_values([by, time_col]),
-        right_sub.sort_values([by, right_time_alias]),
-        left_on=time_col,
-        right_on=right_time_alias,
-        by=by,
-        direction="backward",
+    # Avoid ``merge_asof(..., by=)``: pandas 2.3 raises "left keys must be sorted"
+    # for multi-entity frames even when sorted by [by, time]. Use an equality
+    # join on ``by`` then keep the latest right timestamp <= left timestamp.
+    candidates = left_ok.merge(right_sub, on=by, how="left")
+    timed = candidates[right_time_alias].notna() & (
+        candidates[right_time_alias] <= candidates[time_col]
     )
+    matched = candidates.loc[timed].copy()
+    if matched.empty:
+        merged = left_ok.copy()
+        for col in [*present_values, right_time_alias]:
+            merged[col] = pd.NA
+    else:
+        matched = matched.sort_values(
+            ["_row_id", right_time_alias], kind="mergesort"
+        )
+        matched = matched.drop_duplicates(subset=["_row_id"], keep="last")
+        merged = left_ok.merge(
+            matched[["_row_id", *present_values, right_time_alias]],
+            on="_row_id",
+            how="left",
+        )
+
     combined = pd.concat([merged, left_na], ignore_index=True)
     combined = combined.sort_values("_row_id").drop(columns=["_row_id"])
     return combined.reset_index(drop=True)
