@@ -35,4 +35,6 @@ def test_write_by_partitions_uses_overwrite_then_append(mock_write):
 
     assert mock_write.call_count == 2
     assert mock_write.call_args_list[0].kwargs["mode"] == "overwrite"
+    assert mock_write.call_args_list[0].kwargs["schema_mode"] == "overwrite"
     assert mock_write.call_args_list[1].kwargs["mode"] == "append"
+    assert "schema_mode" not in mock_write.call_args_list[1].kwargs
