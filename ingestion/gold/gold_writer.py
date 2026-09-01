@@ -47,9 +47,9 @@ def _is_string_column(name: str) -> bool:
     return False
 
 
-def _prepare_for_delta(df: pd.DataFrame) -> pd.DataFrame:
+def _prepare_for_delta(df: pd.DataFrame, *, copy: bool = True) -> pd.DataFrame:
     """Coerce column dtypes so delta-rs can infer a valid Arrow schema."""
-    output = df.copy()
+    output = df.copy() if copy else df
 
     for column in output.columns:
         if column == "ano":
@@ -97,7 +97,7 @@ class GoldWriter:
         output = df.copy()
         output["_gold_processed_at"] = datetime.now(timezone.utc).isoformat()
         output["_gold_batch_id"] = batch_id
-        output = _prepare_for_delta(output)
+        _prepare_for_delta(output, copy=False)
 
         partition_col = dataset_config.partition_by
         partition_by = (
@@ -107,11 +107,12 @@ class GoldWriter:
         )
 
         logger.info(
-            "Writing '%s' → %s  (partitionBy=%s, mode=%s)",
+            "Writing '%s' → %s  (partitionBy=%s, mode=%s, rows=%d)",
             dataset_config.name,
             destination,
             partition_by,
             write_mode,
+            len(output),
         )
 
         write_deltalake(
@@ -129,4 +130,32 @@ class GoldWriter:
             len(output),
             destination,
         )
+        return destination
+
+    def write_by_partitions(
+        self,
+        frames: list[pd.DataFrame],
+        dataset_config: GoldDatasetConfig,
+        batch_id: str,
+        *,
+        overwrite: bool = True,
+    ) -> Optional[str]:
+        """Write multiple partition slices sequentially to limit peak memory."""
+        non_empty = [frame for frame in frames if frame is not None and not frame.empty]
+        if not non_empty:
+            logger.warning(
+                "No non-empty partitions for dataset '%s'. Write will be skipped.",
+                dataset_config.name,
+            )
+            return None
+
+        destination: Optional[str] = None
+        for index, frame in enumerate(non_empty):
+            mode_overwrite = overwrite and index == 0
+            destination = self.write(
+                frame,
+                dataset_config,
+                batch_id,
+                overwrite=mode_overwrite,
+            )
         return destination

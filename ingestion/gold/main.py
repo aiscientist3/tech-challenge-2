@@ -10,6 +10,7 @@ CLI usage:
 from __future__ import annotations
 
 import argparse
+import gc
 import logging
 import os
 import sys
@@ -208,6 +209,7 @@ def _publish(
     results: dict[str, str | None],
     quarantine_counts: dict[str, int],
     record_counts: dict[str, int],
+    append_publish: bool = False,
 ) -> None:
     if not quality.quarantine_df.empty:
         quarantine_writer.write(
@@ -221,10 +223,16 @@ def _publish(
         quality.valid_df,
         gold_configs[name],
         batch_id=batch_id,
-        overwrite=overwrite,
+        overwrite=overwrite and not append_publish,
     )
-    quarantine_counts[name] = quality.quarantine_count
-    record_counts[name] = len(quality.valid_df)
+    quarantine_counts[name] = quarantine_counts.get(name, 0) + quality.quarantine_count
+    record_counts[name] = record_counts.get(name, 0) + len(quality.valid_df)
+
+
+def _filter_year(df: pd.DataFrame, year: int, partition_col: str = "ano") -> pd.DataFrame:
+    if df.empty or partition_col not in df.columns:
+        return df
+    return df.loc[df[partition_col] == year]
 
 
 def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
@@ -365,43 +373,60 @@ def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
         )
         contexto = ctx_quality.valid_df
 
-    features = pd.DataFrame()
-    if "alunos_features" in run_config.datasets or "alunos_analytic" in run_config.datasets:
-        logger.info("--- Building alunos_features ---")
-        features = build_alunos_features(alunos, contexto)
-        if "alunos_features" in run_config.datasets:
-            feat_quality = validate_alunos_features(features, municipio)
-            _publish(
-                name="alunos_features",
-                quality=feat_quality,
-                writer=writer,
-                quarantine_writer=quarantine_writer,
-                gold_configs=gold_configs,
-                batch_id=batch_id,
-                overwrite=run_config.overwrite,
-                results=results,
-                quarantine_counts=quarantine_counts,
-                record_counts=record_counts,
-            )
-            features = feat_quality.valid_df
+    if need_contexto:
+        del populacao, pib, socioeconomico, municipio_indicadores, uf_indicadores
+        gc.collect()
 
-    if "alunos_analytic" in run_config.datasets:
-        logger.info("--- Building alunos_analytic ---")
-        analytic = build_alunos_analytic(features)
-        # Analytic inherits territorial FK checks from the parent features table.
-        analytic_quality = validate_alunos_features(analytic, municipio)
-        _publish(
-            name="alunos_analytic",
-            quality=analytic_quality,
-            writer=writer,
-            quarantine_writer=quarantine_writer,
-            gold_configs=gold_configs,
-            batch_id=batch_id,
-            overwrite=run_config.overwrite,
-            results=results,
-            quarantine_counts=quarantine_counts,
-            record_counts=record_counts,
-        )
+    need_student_datasets = (
+        "alunos_features" in run_config.datasets
+        or "alunos_analytic" in run_config.datasets
+    )
+    if need_student_datasets:
+        for year_index, year in enumerate(run_config.years):
+            logger.info("--- Building alunos_features (ano=%s) ---", year)
+            alunos_year = _filter_year(alunos, year)
+            contexto_year = _filter_year(contexto, year)
+            features_year = build_alunos_features(alunos_year, contexto_year)
+            del alunos_year, contexto_year
+
+            if "alunos_features" in run_config.datasets:
+                feat_quality = validate_alunos_features(features_year, municipio)
+                _publish(
+                    name="alunos_features",
+                    quality=feat_quality,
+                    writer=writer,
+                    quarantine_writer=quarantine_writer,
+                    gold_configs=gold_configs,
+                    batch_id=batch_id,
+                    overwrite=run_config.overwrite,
+                    results=results,
+                    quarantine_counts=quarantine_counts,
+                    record_counts=record_counts,
+                    append_publish=year_index > 0,
+                )
+                features_year = feat_quality.valid_df
+
+            if "alunos_analytic" in run_config.datasets:
+                logger.info("--- Building alunos_analytic (ano=%s) ---", year)
+                analytic_year = build_alunos_analytic(features_year)
+                analytic_quality = validate_alunos_features(analytic_year, municipio)
+                _publish(
+                    name="alunos_analytic",
+                    quality=analytic_quality,
+                    writer=writer,
+                    quarantine_writer=quarantine_writer,
+                    gold_configs=gold_configs,
+                    batch_id=batch_id,
+                    overwrite=run_config.overwrite,
+                    results=results,
+                    quarantine_counts=quarantine_counts,
+                    record_counts=record_counts,
+                    append_publish=year_index > 0,
+                )
+                del analytic_year, analytic_quality
+
+            del features_year
+            gc.collect()
 
     environment = os.getenv("ENVIRONMENT", "dev")
     publish_quality_metrics(
