@@ -41,6 +41,7 @@ from ingestion.gold.quality import (
 )
 from ingestion.gold.silver_reader import read_silver
 from ingestion.gold.transforms import (
+    _expand_publica_rede,
     attach_prefixed_meta,
     attach_territorio_municipio,
     build_alunos_analytic,
@@ -282,7 +283,7 @@ def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
         indicador_mun = build_indicador_municipio(alunos, meta_municipio)
         indicador_mun = attach_territorio_municipio(indicador_mun, municipio)
         indicador_mun = attach_prefixed_meta(
-            indicador_mun, meta_brasil, ["ano", "rede"], prefix="brasil_"
+            indicador_mun, _expand_publica_rede(meta_brasil), ["ano", "rede"], prefix="brasil_"
         )
         log_meta_coverage_warning(
             indicador_mun,
@@ -308,7 +309,7 @@ def run_gold(run_config: GoldRunConfig) -> dict[str, str | None]:
         logger.info("--- Building indicador_crianca_alfabetizada_uf ---")
         indicador_uf = build_indicador_uf(alunos, municipio, meta_uf)
         indicador_uf = attach_prefixed_meta(
-            indicador_uf, meta_brasil, ["ano", "rede"], prefix="brasil_"
+            indicador_uf, _expand_publica_rede(meta_brasil), ["ano", "rede"], prefix="brasil_"
         )
         log_meta_coverage_warning(
             indicador_uf,

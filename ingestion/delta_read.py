@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -43,17 +44,56 @@ def _build_s3_client(storage_options: dict[str, str]):
     )
 
 
+_HIVE_PARTITION_RE = re.compile(r"/([^=/]+)=([^/]+)/")
+
+
+def _hive_partition_value(key: str, partition_col: str) -> str | None:
+    """Extract a hive-style partition value from an S3 object key."""
+    for name, value in _HIVE_PARTITION_RE.findall(key):
+        if name == partition_col:
+            return value
+    return None
+
+
+def _inject_partition_column(
+    df: pd.DataFrame,
+    *,
+    partition_col: str,
+    partition_value: str | None,
+) -> pd.DataFrame:
+    """Add ``partition_col`` when it lives only in the hive path, not in parquet."""
+    if partition_col in df.columns or partition_value is None:
+        return df
+    output = df.copy()
+    if partition_value.isdigit():
+        output[partition_col] = pd.array(
+            [int(partition_value)] * len(output), dtype=pd.Int64Dtype()
+        )
+    else:
+        output[partition_col] = partition_value
+    return output
+
+
 def _read_parquet_objects(
     s3_client,
     bucket: str,
     keys: list[str],
+    *,
+    partition_col: str | None = None,
 ) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     for key in keys:
         if not key.endswith(".parquet") or "_delta_log" in key:
             continue
         body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
-        frames.append(pd.read_parquet(io.BytesIO(body)))
+        part = pd.read_parquet(io.BytesIO(body))
+        if partition_col:
+            part = _inject_partition_column(
+                part,
+                partition_col=partition_col,
+                partition_value=_hive_partition_value(key, partition_col),
+            )
+        frames.append(part)
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
@@ -87,7 +127,9 @@ def _read_via_file_uris(
                 continue
             bucket, _ = _parse_s3_uri(uris[0])
             keys = [key for _, key in _uris_to_keys(uris)]
-            part = _read_parquet_objects(s3_client, bucket, keys)
+            part = _read_parquet_objects(
+                s3_client, bucket, keys, partition_col=partition_col
+            )
             if partition_col not in part.columns:
                 part = part.copy()
                 part[partition_col] = year
@@ -99,7 +141,12 @@ def _read_via_file_uris(
             return pd.DataFrame()
         bucket, _ = _parse_s3_uri(uris[0])
         keys = [key for _, key in _uris_to_keys(uris)]
-        return _read_parquet_objects(s3_client, bucket, keys)
+        return _read_parquet_objects(
+            s3_client,
+            bucket,
+            keys,
+            partition_col=partition_col,
+        )
 
     if not frames:
         return pd.DataFrame()
