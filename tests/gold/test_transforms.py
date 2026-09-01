@@ -111,6 +111,41 @@ def test_as_of_join_picks_latest_year_not_after_left() -> None:
     assert by_year.loc[2023, "populacao"] == 30.0
 
 
+def test_as_of_join_handles_shuffled_string_dtype_keys() -> None:
+    """Regression: Databricks failed with ValueError: left keys must be sorted."""
+    ids = [f"{i:07d}" for i in range(1000, 2500)]
+    left = pd.DataFrame(
+        [
+            {"ano": year, "id_municipio": municipio}
+            for municipio in ids
+            for year in (2023, 2024)
+        ]
+    ).sample(frac=1, random_state=0).reset_index(drop=True)
+    left["id_municipio"] = left["id_municipio"].astype("string")
+    left["ano"] = left["ano"].astype("Int64")
+
+    right = pd.DataFrame(
+        {
+            "ano": [2018, 2019, 2020] * len(ids),
+            "id_municipio": [municipio for municipio in ids for _ in range(3)],
+            "populacao": list(range(3 * len(ids))),
+        }
+    )
+    right["id_municipio"] = right["id_municipio"].astype("string")
+
+    result = as_of_join(
+        left,
+        right,
+        by="id_municipio",
+        time_col="ano",
+        value_cols=["populacao"],
+        right_time_alias="populacao_ano_ref",
+    )
+    assert len(result) == len(left)
+    assert result["populacao"].notna().all()
+    assert (result["populacao_ano_ref"] == 2020).all()
+
+
 def test_snapshot_join_broadcasts_latest_year() -> None:
     left = pd.DataFrame({"ano": [2024], "id_municipio": ["3550308"]})
     right = pd.DataFrame(
