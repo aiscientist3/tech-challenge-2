@@ -12,6 +12,7 @@ from ingestion.gold.transforms import (
     build_contexto_territorio,
     build_indicador_municipio,
     build_indicador_uf,
+    dedupe_contexto_territorio,
     normalize_alfabetizado_flag,
     snapshot_join,
 )
@@ -255,3 +256,114 @@ def test_alunos_features_maps_rede_codes_for_join(
     assert "alfabetizado" in analytic.columns
     assert "proficiencia" not in analytic.columns
     assert "_join_match" not in analytic.columns
+
+
+def test_dedupe_contexto_prefers_ibge_row() -> None:
+    contexto = pd.DataFrame(
+        {
+            "ano": [2024, 2024],
+            "id_municipio": ["3550308", "3550308"],
+            "rede": ["municipal", "municipal"],
+            "populacao": [11_895_578, pd.NA],
+            "pib": [100.0, pd.NA],
+            "ivs": [0.393, 0.393],
+            "nome_municipio": ["São Paulo", "São Paulo"],
+        }
+    )
+    result = dedupe_contexto_territorio(contexto)
+    assert len(result) == 1
+    assert result.iloc[0]["populacao"] == 11_895_578
+    assert result.iloc[0]["pib"] == 100.0
+
+
+def test_alunos_features_joins_ibge_for_estadual(
+    sample_meta_municipio: pd.DataFrame,
+    sample_meta_uf: pd.DataFrame,
+    sample_meta_brasil: pd.DataFrame,
+    sample_municipio: pd.DataFrame,
+) -> None:
+    alunos = pd.DataFrame(
+        {
+            "ano": [2024],
+            "id_municipio": ["3550308"],
+            "id_aluno": ["A9"],
+            "serie": ["2º ano"],
+            "rede": ["estadual"],
+            "alfabetizado": ["Sim"],
+            "peso_aluno": [1.0],
+        }
+    )
+    populacao = pd.DataFrame(
+        {"ano": [2020], "id_municipio": ["3550308"], "populacao": [11_895_578]}
+    )
+    pib = pd.DataFrame(
+        {"ano": [2020], "id_municipio": ["3550308"], "pib": [250_000_000.0]}
+    )
+    contexto = build_contexto_territorio(
+        meta_municipio=sample_meta_municipio,
+        meta_uf=sample_meta_uf,
+        meta_brasil=sample_meta_brasil,
+        municipio=sample_municipio,
+        populacao=populacao,
+        pib=pib,
+        socioeconomico=pd.DataFrame(),
+        municipio_indicadores=pd.DataFrame(),
+        uf_indicadores=pd.DataFrame(),
+        alunos=alunos,
+    )
+    features = build_alunos_features(alunos, contexto)
+    row = features.iloc[0]
+    assert row["rede"] == "estadual"
+    assert row["_join_match"]
+    assert row["nome_municipio"] == "São Paulo"
+    assert row["populacao"] == 11_895_578
+    assert row["pib"] == 250_000_000.0
+
+
+def test_contexto_joins_publica_meta_to_estadual(
+    sample_meta_municipio: pd.DataFrame,
+    sample_municipio: pd.DataFrame,
+) -> None:
+    meta_uf = pd.DataFrame(
+        {
+            "ano": [2024],
+            "sigla_uf": ["SP"],
+            "rede": ["publica"],
+            "meta_alfabetizacao_2024": [72.0],
+        }
+    )
+    meta_brasil = pd.DataFrame(
+        {
+            "ano": [2024],
+            "rede": ["publica"],
+            "meta_alfabetizacao_2024": [68.0],
+        }
+    )
+    alunos = pd.DataFrame(
+        {
+            "ano": [2024],
+            "id_municipio": ["3550308"],
+            "id_aluno": ["A1"],
+            "serie": ["2º ano"],
+            "rede": ["estadual"],
+            "alfabetizado": ["Sim"],
+            "peso_aluno": [1.0],
+        }
+    )
+    contexto = build_contexto_territorio(
+        meta_municipio=sample_meta_municipio,
+        meta_uf=meta_uf,
+        meta_brasil=meta_brasil,
+        municipio=sample_municipio,
+        populacao=pd.DataFrame(),
+        pib=pd.DataFrame(),
+        socioeconomico=pd.DataFrame(),
+        municipio_indicadores=pd.DataFrame(),
+        uf_indicadores=pd.DataFrame(),
+        alunos=alunos,
+    )
+    row = contexto[
+        (contexto["rede"] == "estadual") & (contexto["id_municipio"] == "3550308")
+    ].iloc[0]
+    assert row["uf_meta_alfabetizacao_2024"] == 72.0
+    assert row["brasil_meta_alfabetizacao_2024"] == 68.0

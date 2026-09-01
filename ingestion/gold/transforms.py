@@ -64,6 +64,17 @@ _SOCIO_VALUE_COLS: tuple[str, ...] = (
 
 _JOIN_KEYS_MUNICIPIO: list[str] = ["ano", "id_municipio", "rede"]
 
+_IBGE_CONTEXT_COLS: tuple[str, ...] = (
+    "populacao",
+    "populacao_ano_ref",
+    "pib",
+    "pib_ano_ref",
+    "pib_per_capita",
+    "socio_ano_ref",
+)
+
+_PUBLICA_TARGET_REDES: tuple[str, ...] = ("municipal", "estadual", "privada", "federal")
+
 _PIPELINE_OR_LEAKAGE_ANALYTIC: frozenset[str] = frozenset(
     {
         "nivel_alfabetizacao",
@@ -82,6 +93,149 @@ def _standardize_keys(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df.copy()
     return standardize_common(df)
+
+
+def _expand_publica_rede(meta: pd.DataFrame) -> pd.DataFrame:
+    """
+    Broadcast ``rede=publica`` meta rows onto the student-level rede labels.
+
+    Official INEP UF/Brasil tables use ``publica`` while microdata uses
+    ``municipal`` / ``estadual`` / ``privada``.
+    """
+    if meta.empty or "rede" not in meta.columns:
+        return meta.copy()
+
+    std = _standardize_keys(meta)
+    publica = std[std["rede"] == "publica"]
+    specific = std[std["rede"] != "publica"]
+    if publica.empty:
+        return specific.reset_index(drop=True)
+
+    expanded: list[pd.DataFrame] = [specific]
+    for rede in _PUBLICA_TARGET_REDES:
+        copy = publica.copy()
+        copy["rede"] = rede
+        expanded.append(copy)
+
+    combined = pd.concat(expanded, ignore_index=True)
+    dedupe_keys = [col for col in ("ano", "sigla_uf", "rede") if col in combined.columns]
+    if not dedupe_keys:
+        dedupe_keys = [col for col in ("ano", "rede") if col in combined.columns]
+    if dedupe_keys:
+        combined = combined.drop_duplicates(subset=dedupe_keys, keep="first")
+    return combined.reset_index(drop=True)
+
+
+def _contexto_row_score(row: pd.Series) -> int:
+    """Higher score = richer row; used to pick the canonical contexto record."""
+    score = 0
+    for col in (
+        *_IBGE_CONTEXT_COLS,
+        "nome_municipio",
+        "ivs",
+        "meta_alfabetizacao_2024",
+        "taxa_alfabetizacao",
+    ):
+        if col in row.index and pd.notna(row[col]):
+            score += 1
+    return score
+
+
+def dedupe_contexto_territorio(contexto: pd.DataFrame) -> pd.DataFrame:
+    """
+    Collapse ``contexto_territorio`` to one row per ``(ano, id_municipio, rede)``.
+
+    When IBGE and IVS enrichment diverge across duplicate keys, keep the row with
+    the most populated socio-economic fields (coalesce-by-preference).
+    """
+    if contexto.empty:
+        return contexto.copy()
+
+    df = _standardize_keys(contexto)
+    df = df.dropna(subset=["ano", "id_municipio", "rede"])
+    if df.empty:
+        return df
+
+    before = len(df)
+    df["_dedupe_score"] = df.apply(_contexto_row_score, axis=1)
+    df = df.sort_values("_dedupe_score", ascending=False)
+    df = df.drop_duplicates(subset=_JOIN_KEYS_MUNICIPIO, keep="first")
+    df = df.drop(columns=["_dedupe_score"])
+
+    if len(df) != before:
+        logger.warning(
+            "contexto_territorio deduped at %s: %d → %d rows.",
+            _JOIN_KEYS_MUNICIPIO,
+            before,
+            len(df),
+        )
+    return df.reset_index(drop=True)
+
+
+def _attach_municipal_ibge(
+    contexto: pd.DataFrame,
+    populacao: pd.DataFrame,
+    pib: pd.DataFrame,
+    socioeconomico: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Attach IBGE / socio-economic snapshots once per ``(ano, id_municipio)``.
+
+    IBGE indicators are municipal — the same values must be replicated for every
+    ``rede`` in the municipality without creating partial duplicate rows.
+    """
+    if contexto.empty:
+        return contexto.copy()
+
+    muni_keys = contexto[["ano", "id_municipio"]].drop_duplicates()
+    enriched = as_of_join(
+        muni_keys,
+        _standardize_keys(populacao),
+        by="id_municipio",
+        time_col="ano",
+        value_cols=["populacao"],
+        right_time_alias="populacao_ano_ref",
+    )
+    enriched = as_of_join(
+        enriched,
+        _standardize_keys(pib),
+        by="id_municipio",
+        time_col="ano",
+        value_cols=["pib"],
+        right_time_alias="pib_ano_ref",
+    )
+
+    if "pib" in enriched.columns and "populacao" in enriched.columns:
+        pib_num = pd.to_numeric(enriched["pib"], errors="coerce")
+        pop_num = pd.to_numeric(enriched["populacao"], errors="coerce")
+        enriched["pib_per_capita"] = pib_num / pop_num.replace(0, pd.NA)
+
+    socio_std = _standardize_keys(socioeconomico)
+    socio_cols = [col for col in _SOCIO_VALUE_COLS if col in socio_std.columns]
+    enriched = snapshot_join(
+        enriched,
+        socio_std,
+        by="id_municipio",
+        time_col="ano",
+        value_cols=socio_cols,
+        year_alias="socio_ano_ref",
+    )
+
+    ibge_cols = [
+        col
+        for col in enriched.columns
+        if col not in muni_keys.columns or col in ("ano", "id_municipio")
+    ]
+    ibge_cols = [col for col in ibge_cols if col in enriched.columns]
+    ibge_subset = enriched[ibge_cols].drop_duplicates(subset=["ano", "id_municipio"])
+
+    overlap = [
+        col
+        for col in ibge_subset.columns
+        if col in contexto.columns and col not in ("ano", "id_municipio")
+    ]
+    base = contexto.drop(columns=overlap, errors="ignore")
+    return base.merge(ibge_subset, on=["ano", "id_municipio"], how="left")
 
 
 def normalize_alfabetizado_flag(series: pd.Series) -> pd.Series:
@@ -240,10 +394,19 @@ def attach_territorio_municipio(
         )
         .drop_duplicates(subset=["id_municipio"])
     )
-    extra = [col for col in lookup.columns if col == "id_municipio" or col not in df.columns]
-    if extra == ["id_municipio"]:
-        return df.copy()
-    return df.merge(lookup[extra], on="id_municipio", how="left")
+    merged = df.merge(lookup, on="id_municipio", how="left", suffixes=("", "_terr"))
+    for col in lookup.columns:
+        if col == "id_municipio":
+            continue
+        ref = f"{col}_terr"
+        if ref not in merged.columns:
+            continue
+        if col in merged.columns:
+            merged[col] = merged[col].where(merged[col].notna(), merged[ref])
+        else:
+            merged[col] = merged[ref]
+        merged = merged.drop(columns=[ref])
+    return merged
 
 
 def as_of_join(
@@ -475,7 +638,7 @@ def build_indicador_uf(
 
     indicator = add_gap_analysis(
         indicator,
-        meta_uf,
+        _expand_publica_rede(meta_uf),
         join_keys=["ano", "sigla_uf", "rede"],
     )
 
@@ -517,56 +680,27 @@ def build_contexto_territorio(
         logger.warning("Cannot build contexto_territorio: no join keys available.")
         return pd.DataFrame()
 
-    keys = pd.concat(key_frames, ignore_index=True).drop_duplicates()
-    keys = keys.dropna(subset=["id_municipio", "rede"])
+    keys = pd.concat(key_frames, ignore_index=True)
+    keys = _standardize_keys(keys)
+    keys = keys.dropna(subset=_JOIN_KEYS_MUNICIPIO)
+    keys = keys.drop_duplicates(subset=_JOIN_KEYS_MUNICIPIO)
     contexto = keys.merge(meta, on=_JOIN_KEYS_MUNICIPIO, how="left") if not meta.empty else keys
 
     contexto = attach_territorio_municipio(contexto, _standardize_keys(municipio))
     contexto = attach_prefixed_meta(
         contexto,
-        _standardize_keys(meta_uf),
+        _expand_publica_rede(meta_uf),
         ["ano", "sigla_uf", "rede"],
         prefix="uf_",
     )
     contexto = attach_prefixed_meta(
         contexto,
-        _standardize_keys(meta_brasil),
+        _expand_publica_rede(meta_brasil),
         ["ano", "rede"],
         prefix="brasil_",
     )
 
-    contexto = as_of_join(
-        contexto,
-        _standardize_keys(populacao),
-        by="id_municipio",
-        time_col="ano",
-        value_cols=["populacao"],
-        right_time_alias="populacao_ano_ref",
-    )
-    contexto = as_of_join(
-        contexto,
-        _standardize_keys(pib),
-        by="id_municipio",
-        time_col="ano",
-        value_cols=["pib"],
-        right_time_alias="pib_ano_ref",
-    )
-
-    if "pib" in contexto.columns and "populacao" in contexto.columns:
-        pib_num = pd.to_numeric(contexto["pib"], errors="coerce")
-        pop_num = pd.to_numeric(contexto["populacao"], errors="coerce")
-        contexto["pib_per_capita"] = pib_num / pop_num.replace(0, pd.NA)
-
-    socio_std = _standardize_keys(socioeconomico)
-    socio_cols = [col for col in _SOCIO_VALUE_COLS if col in socio_std.columns]
-    contexto = snapshot_join(
-        contexto,
-        socio_std,
-        by="id_municipio",
-        time_col="ano",
-        value_cols=socio_cols,
-        year_alias="socio_ano_ref",
-    )
+    contexto = _attach_municipal_ibge(contexto, populacao, pib, socioeconomico)
 
     lagged_mun = lag_indicators(
         _standardize_keys(municipio_indicadores),
@@ -589,6 +723,8 @@ def build_contexto_territorio(
                 key for key in ["ano", "sigla_uf", "rede"] if key in lagged_uf.columns
             ]
             contexto = contexto.merge(lagged_uf, on=lag_keys, how="left")
+
+    contexto = dedupe_contexto_territorio(contexto)
 
     logger.info(
         "contexto_territorio built: %d rows | redes=%s",
@@ -640,7 +776,9 @@ def build_alunos_features(
         features["_join_match"] = False
         return _drop_leakage_columns(features)
 
-    context_clean = _drop_leakage_columns(_standardize_keys(contexto))
+    context_clean = dedupe_contexto_territorio(
+        _drop_leakage_columns(_standardize_keys(contexto))
+    )
     join_keys = [
         key
         for key in _JOIN_KEYS_MUNICIPIO
@@ -654,7 +792,7 @@ def build_alunos_features(
     if overlap:
         context_clean = context_clean.drop(columns=overlap)
 
-    features = features.merge(context_clean, on=join_keys, how="left")
+    features = features.merge(context_clean, on=join_keys, how="left", validate="many_to_one")
     features["_join_match"] = (
         features["nome_municipio"].notna()
         if "nome_municipio" in features.columns
